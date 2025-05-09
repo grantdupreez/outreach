@@ -42,8 +42,11 @@ if "initialized" not in st.session_state:
     st.session_state.generated_message = ""
     st.session_state.message_type = "coldOutreach"
     st.session_state.networking_goal = "Career Advancement"
+    st.session_state.custom_goal = ""
     st.session_state.custom_topic = ""
     st.session_state.recommendations = []
+    st.session_state.current_page = 0  # For recommendation pagination
+    st.session_state.results_per_page = 5  # Number of recommendations per page
     st.session_state.CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
     st.session_state.profile_uploaded = False
     st.session_state.connections_uploaded = False
@@ -593,7 +596,7 @@ def extract_seniority(position):
         return "Mid Level"
 
 # Helper Functions
-def generate_recommendations(count=5):
+def generate_recommendations(count=30):
     """Generate AI-powered contact recommendations"""
     if not st.session_state.linkedin_connections:
         return []
@@ -624,6 +627,24 @@ def generate_recommendations(count=5):
         
         # Mutual connections bonus
         base_score += min(contact.get("mutualConnections", 0) * 3, 15)
+        
+        # Custom goal bonus (if specified)
+        custom_goal = st.session_state.get("custom_goal", "").lower()
+        if custom_goal:
+            # Check if custom goal terms are present in contact fields
+            goal_terms = [term.strip() for term in custom_goal.split() if len(term.strip()) > 3]
+            
+            for term in goal_terms:
+                # Check various fields for the term
+                term_found = False
+                for field in ["industry", "expertise", "role", "company"]:
+                    if term in str(contact.get(field, "")).lower():
+                        base_score += 15
+                        term_found = True
+                        break
+                
+                if term_found:
+                    break  # Only apply bonus once per contact
         
         # Add some randomness
         score = min(max(base_score + random.randint(-5, 5), 40), 95)
@@ -665,6 +686,14 @@ def generate_recommendations(count=5):
             if contact.get("company"):
                 insights.append(f"Works at target company ({contact.get('company')})")
         
+        # Custom goal insights
+        if custom_goal:
+            for field in ["industry", "expertise", "role", "company"]:
+                value = contact.get(field, "")
+                if value and any(term.lower() in value.lower() for term in goal_terms if len(term) > 3):
+                    insights.append(f"Matches your goal: {value}")
+                    break
+        
         # Fill with more generic insights if needed
         if len(insights) < 2:
             potential_insights = [
@@ -704,6 +733,18 @@ def generate_recommendations(count=5):
 def generate_conversation_starters(contact):
     """Generate conversation starters for a contact"""
     starters = []
+    
+    # Get custom goal if set
+    custom_goal = st.session_state.get("custom_goal", "").lower()
+    
+    # Based on custom goal if set
+    if custom_goal:
+        goal_terms = [term.strip() for term in custom_goal.split() if len(term.strip()) > 3]
+        for term in goal_terms:
+            for field in ["industry", "expertise", "role", "company"]:
+                if contact.get(field) and term in contact.get(field).lower():
+                    starters.append(f"I noticed your background in {contact.get(field)}. I'm particularly focused on {custom_goal} right now, and would value your perspective on this area.")
+                    break
     
     # Based on connected date
     if contact.get("connectedDate"):
@@ -786,6 +827,12 @@ def generate_basic_message(contact, template_type="coldOutreach", custom_topic="
         replacements["{{goalContext}}"] = "exploring new career opportunities in our field"
     else:
         replacements["{{goalContext}}"] = "expanding my professional network"
+    
+    # Add custom goal if specified
+    custom_goal = st.session_state.get("custom_goal", "")
+    if custom_goal:
+        replacements["{{customGoal}}"] = custom_goal
+        replacements["{{goalContext}}"] = f"{replacements['{{goalContext}}']} with a focus on {custom_goal}"
     
     # Template selection
     templates = {
@@ -933,10 +980,20 @@ SENDER'S PROFILE:
 
 MESSAGE DETAILS:
 - Message Type: {template_type}
-- Networking Goal: {st.session_state.networking_goal}
+- Primary Networking Goal: {st.session_state.networking_goal}
 - Specific Topic of Interest: {specific_topic}
+"""
 
-Create a personalized {template_type} message based on this information that furthers the networking goal of {st.session_state.networking_goal}."""
+        # Add custom goal if specified
+        if st.session_state.get("custom_goal"):
+            user_prompt += f"- Specific Networking Objective: {st.session_state.custom_goal}\n"
+
+        user_prompt += f"\nCreate a personalized {template_type} message based on this information that furthers the networking goal of {st.session_state.networking_goal}"
+        
+        if st.session_state.get("custom_goal"):
+            user_prompt += f" with a focus on the specific objective: {st.session_state.custom_goal}"
+        
+        user_prompt += "."
 
         # Send request to Claude
         with st.spinner("Generating personalized message with Claude AI..."):
@@ -1176,11 +1233,24 @@ with st.sidebar:
         index=["Career Advancement", "Industry Knowledge", "Business Development", "Job Seeking"].index(st.session_state.networking_goal)
     )
     
+    # Add custom goal text field
+    custom_goal = st.text_input(
+        "Specific networking objective (optional)",
+        value=st.session_state.get("custom_goal", ""),
+        placeholder="e.g., Finding mentors in AI, Connecting with potential clients in healthcare",
+        help="Describe your specific networking objective to help generate more relevant recommendations and messages"
+    )
+    
+    # Update session state for custom goal
+    if "custom_goal" not in st.session_state or custom_goal != st.session_state.custom_goal:
+        st.session_state.custom_goal = custom_goal
+    
     if goal != st.session_state.networking_goal:
         st.session_state.networking_goal = goal
         # Refresh recommendations when goal changes
         if len(st.session_state.linkedin_connections) > 0:
-            st.session_state.recommendations = generate_recommendations(5)
+            st.session_state.recommendations = generate_recommendations(30)  # Generate more recommendations for pagination
+            st.session_state.current_page = 0  # Reset to first page
     
     st.markdown("### About")
     st.markdown("""
@@ -1373,6 +1443,11 @@ elif st.session_state.active_tab == "recommendations":
     }
     
     st.markdown(f"### Current Goal: **{st.session_state.networking_goal}**")
+    
+    # Display custom goal if set
+    if st.session_state.get("custom_goal"):
+        st.markdown(f"**Specific Objective:** {st.session_state.custom_goal}")
+    
     st.markdown(goal_descriptions.get(st.session_state.networking_goal, ""))
     
     # Goal-specific tips
@@ -1409,26 +1484,104 @@ elif st.session_state.active_tab == "recommendations":
     
     # Refresh recommendations if needed
     if not st.session_state.recommendations:
-        st.session_state.recommendations = generate_recommendations(5)
+        st.session_state.recommendations = generate_recommendations(30)  # Generate more recommendations for pagination
     
     # Display refresh button
     if st.button("Refresh Recommendations"):
         with st.spinner("Generating fresh recommendations..."):
             time.sleep(1)  # Simulate processing time
-            st.session_state.recommendations = generate_recommendations(5)
+            st.session_state.recommendations = generate_recommendations(30)
+            st.session_state.current_page = 0  # Reset to first page
+    
+    # Pagination setup
+    if "current_page" not in st.session_state:
+        st.session_state.current_page = 0
+    
+    results_per_page = st.session_state.results_per_page
+    
+    # Determine total number of pages
+    total_recommendations = len(st.session_state.recommendations)
+    total_pages = max(1, (total_recommendations + results_per_page - 1) // results_per_page)
+    
+    # Filter recommendations for current page
+    start_idx = st.session_state.current_page * results_per_page
+    end_idx = min(start_idx + results_per_page, total_recommendations)
+    
+    current_recommendations = st.session_state.recommendations[start_idx:end_idx] if st.session_state.recommendations else []
+    
+    # Add pagination controls at the top
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col1:
+        if st.button("⬅️ Previous", disabled=st.session_state.current_page == 0):
+            st.session_state.current_page = max(0, st.session_state.current_page - 1)
+            st.rerun()
+    
+    with col2:
+        if total_recommendations > 0:
+            st.markdown(f"<div style='text-align: center;'>Page {st.session_state.current_page + 1} of {total_pages} • Showing {start_idx + 1}-{end_idx} of {total_recommendations} contacts</div>", unsafe_allow_html=True)
+        else:
+            st.markdown("<div style='text-align: center;'>No recommendations available</div>", unsafe_allow_html=True)
+    
+    with col3:
+        if st.button("Next ➡️", disabled=st.session_state.current_page >= total_pages - 1):
+            st.session_state.current_page = min(total_pages - 1, st.session_state.current_page + 1)
+            st.rerun()
+    
+    # Filter and search
+    st.markdown("<div style='padding: 10px 0px;'>", unsafe_allow_html=True)
+    search_query = st.text_input("Filter contacts by name, company, role, or expertise:", 
+                                 placeholder="Enter keywords to filter results")
+    st.markdown("</div>", unsafe_allow_html=True)
+    
+    # Filter recommendations if search query provided
+    if search_query:
+        filtered_recommendations = []
+        for rec in st.session_state.recommendations:
+            searchable_text = " ".join([
+                str(rec.get("firstName", "")),
+                str(rec.get("lastName", "")),
+                str(rec.get("company", "")),
+                str(rec.get("role", "")),
+                str(rec.get("expertise", "")),
+                str(rec.get("industry", ""))
+            ]).lower()
+            
+            if search_query.lower() in searchable_text:
+                filtered_recommendations.append(rec)
+        
+        # Update pagination for filtered results
+        total_filtered = len(filtered_recommendations)
+        total_filtered_pages = max(1, (total_filtered + results_per_page - 1) // results_per_page)
+        
+        # Reset page if needed
+        if st.session_state.current_page >= total_filtered_pages:
+            st.session_state.current_page = 0
+        
+        # Get current page of filtered results
+        filtered_start = st.session_state.current_page * results_per_page
+        filtered_end = min(filtered_start + results_per_page, total_filtered)
+        
+        current_recommendations = filtered_recommendations[filtered_start:filtered_end]
+        
+        # Show filter result stats
+        st.markdown(f"<div style='padding: 5px 0px;'><i>Found {total_filtered} contacts matching '{search_query}'</i></div>", unsafe_allow_html=True)
     
     # Create a two-column layout
     col1, col2 = st.columns([2, 1])
     
     with col1:
         # Display recommendations
-        if not st.session_state.recommendations:
+        if not current_recommendations:
             st.markdown("<div class='card' style='text-align: center; padding: 2rem;'>", unsafe_allow_html=True)
             st.markdown("### No Recommendations Available")
-            st.markdown("We couldn't generate any recommendations based on your connections. Try changing your networking goal or refreshing the recommendations.")
+            if search_query:
+                st.markdown(f"No contacts match your search for '{search_query}'. Try a different search term or clear the filter.")
+            else:
+                st.markdown("We couldn't generate any recommendations based on your connections. Try changing your networking goal or refreshing the recommendations.")
             st.markdown("</div>", unsafe_allow_html=True)
         else:
-            for i, contact in enumerate(st.session_state.recommendations):
+            for i, contact in enumerate(current_recommendations):
                 is_selected = st.session_state.selected_contact and st.session_state.selected_contact["id"] == contact["id"]
                 
                 st.markdown(
@@ -1502,6 +1655,34 @@ elif st.session_state.active_tab == "recommendations":
                         st.rerun()
                 
                 st.markdown("</div>", unsafe_allow_html=True)
+            
+            # Add pagination controls at the bottom
+            st.markdown("<div style='padding: 15px 0px;'>", unsafe_allow_html=True)
+            col1, col2, col3 = st.columns([1, 2, 1])
+            
+            with col1:
+                if st.button("⬅️ Previous", key="prev_bottom", disabled=st.session_state.current_page == 0):
+                    st.session_state.current_page = max(0, st.session_state.current_page - 1)
+                    st.rerun()
+            
+            with col2:
+                if search_query:
+                    current_page_count = len(current_recommendations)
+                    st.markdown(f"<div style='text-align: center;'>Page {st.session_state.current_page + 1} of {total_filtered_pages} • Showing {filtered_start + 1}-{filtered_start + current_page_count} of {total_filtered} filtered contacts</div>", unsafe_allow_html=True)
+                else:
+                    st.markdown(f"<div style='text-align: center;'>Page {st.session_state.current_page + 1} of {total_pages} • Showing {start_idx + 1}-{end_idx} of {total_recommendations} contacts</div>", unsafe_allow_html=True)
+            
+            with col3:
+                if search_query:
+                    if st.button("Next ➡️", key="next_bottom", disabled=st.session_state.current_page >= total_filtered_pages - 1):
+                        st.session_state.current_page = min(total_filtered_pages - 1, st.session_state.current_page + 1)
+                        st.rerun()
+                else:
+                    if st.button("Next ➡️", key="next_bottom", disabled=st.session_state.current_page >= total_pages - 1):
+                        st.session_state.current_page = min(total_pages - 1, st.session_state.current_page + 1)
+                        st.rerun()
+            
+            st.markdown("</div>", unsafe_allow_html=True)
     
     with col2:
         # Display selected contact detail
