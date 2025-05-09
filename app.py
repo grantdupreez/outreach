@@ -175,45 +175,295 @@ st.markdown("""
 
 # Helper Functions for CSV processing
 def process_profile_csv(file):
-    """Process LinkedIn Profile.csv file"""
+    """Process LinkedIn Profile.csv file with robust error handling"""
     try:
-        df = pd.read_csv(file)
+        # Try multiple parsing approaches
+        try:
+            # First attempt: Standard parsing
+            df = pd.read_csv(
+                file,
+                encoding='utf-8',
+                on_bad_lines='warn',
+                quotechar='"',
+                escapechar='\\',
+                low_memory=False,
+                skipinitialspace=True
+            )
+        except Exception as e1:
+            # Second attempt: Try with python engine
+            try:
+                file.seek(0)
+                df = pd.read_csv(
+                    file,
+                    encoding='utf-8',
+                    delimiter=',',
+                    engine='python',
+                    on_bad_lines='skip',
+                    quoting=3,  # QUOTE_NONE
+                    skipinitialspace=True
+                )
+            except Exception as e2:
+                # Third attempt: Try different encoding
+                try:
+                    file.seek(0)
+                    df = pd.read_csv(
+                        file,
+                        encoding='latin-1',
+                        delimiter=',',
+                        engine='python',
+                        on_bad_lines='skip'
+                    )
+                except Exception as e3:
+                    # Last attempt: Manual parsing
+                    file.seek(0)
+                    content = file.read().decode('utf-8', errors='replace')
+                    
+                    # Try to find key profile fields manually
+                    first_name = extract_field(content, "First Name")
+                    last_name = extract_field(content, "Last Name")
+                    headline = extract_field(content, "Headline")
+                    industry = extract_field(content, "Industry")
+                    location = extract_field(content, "Geo Location")
+                    summary = extract_field(content, "Summary")
+                    
+                    if first_name or last_name:
+                        return {
+                            "firstName": first_name,
+                            "lastName": last_name,
+                            "name": f"{first_name} {last_name}".strip(),
+                            "headline": headline,
+                            "summary": summary,
+                            "industry": industry,
+                            "location": location
+                        }
+                    else:
+                        raise Exception("Could not extract profile data from the file")
+        
+        # Show a preview of the processed data
+        with st.expander("Preview of imported profile data"):
+            st.write("Profile data preview:")
+            st.dataframe(df.head())
+        
+        # Normalize column names
+        df.columns = [col.strip().title() for col in df.columns]
+        
+        # Map common variations to standard names
+        column_mapping = {
+            'First': 'First Name',
+            'Last': 'Last Name',
+            'Geo Location': 'Location',
+            'Geo': 'Location',
+            'Profile Summary': 'Summary',
+            'About': 'Summary'
+        }
+        
+        for old_col, new_col in column_mapping.items():
+            if old_col in df.columns and new_col not in df.columns:
+                df = df.rename(columns={old_col: new_col})
+        
         if len(df) > 0:
             # Extract first row since there should be only one profile
-            profile_data = df.iloc[0].to_dict()
+            profile_row = df.iloc[0]
             
+            # Safely extract fields
             user_profile = {
-                "firstName": profile_data.get("First Name", ""),
-                "lastName": profile_data.get("Last Name", ""),
-                "name": f"{profile_data.get('First Name', '')} {profile_data.get('Last Name', '')}".strip(),
-                "headline": profile_data.get("Headline", ""),
-                "summary": profile_data.get("Summary", ""),
-                "industry": profile_data.get("Industry", ""),
-                "location": profile_data.get("Geo Location", "")
+                "firstName": str(profile_row.get('First Name', '')) if hasattr(profile_row, 'get') else str(profile_row['First Name']) if 'First Name' in profile_row.index else '',
+                "lastName": str(profile_row.get('Last Name', '')) if hasattr(profile_row, 'get') else str(profile_row['Last Name']) if 'Last Name' in profile_row.index else '',
+                "headline": str(profile_row.get('Headline', '')) if hasattr(profile_row, 'get') else str(profile_row['Headline']) if 'Headline' in profile_row.index else '',
+                "summary": str(profile_row.get('Summary', '')) if hasattr(profile_row, 'get') else str(profile_row['Summary']) if 'Summary' in profile_row.index else '',
+                "industry": str(profile_row.get('Industry', '')) if hasattr(profile_row, 'get') else str(profile_row['Industry']) if 'Industry' in profile_row.index else '',
+                "location": str(profile_row.get('Location', '')) if hasattr(profile_row, 'get') else str(profile_row['Location']) if 'Location' in profile_row.index else \
+                           str(profile_row.get('Geo Location', '')) if hasattr(profile_row, 'get') else str(profile_row['Geo Location']) if 'Geo Location' in profile_row.index else ''
             }
+            
+            # Ensure name is properly set
+            user_profile["name"] = f"{user_profile['firstName']} {user_profile['lastName']}".strip()
+            
             return user_profile
         else:
-            st.error("Profile CSV file is empty")
+            st.error("Profile CSV file is empty or does not contain valid data")
             return None
+            
     except Exception as e:
         st.error(f"Error processing profile CSV: {str(e)}")
+        
+        # Additional debugging information
+        st.expander("Debugging Information").write(f"""
+        Error type: {type(e).__name__}
+        Error details: {str(e)}
+        
+        Common issues:
+        - CSV file format may not match expected LinkedIn export format
+        - Special characters or formatting issues in the file
+        - Missing required columns (First Name, Last Name)
+        
+        Try exporting your profile data again from LinkedIn, or check the file for formatting issues.
+        """)
+        
         return None
 
+def extract_field(content, field_name):
+    """Extract a field from CSV content using regex pattern matching"""
+    pattern = re.compile(f"{field_name}[,:]\\s*([^,\\n]+)")
+    match = pattern.search(content)
+    if match:
+        return match.group(1).strip().strip('"')
+    return ""
+
 def process_connections_csv(file):
-    """Process LinkedIn Connections.csv file"""
+    """Process LinkedIn Connections.csv file with robust error handling"""
     try:
-        df = pd.read_csv(file)
+        # Try multiple parsing approaches to handle LinkedIn's inconsistent CSV format
+        try:
+            # First attempt: Use pandas with more flexible parsing options
+            df = pd.read_csv(
+                file,
+                encoding='utf-8',
+                on_bad_lines='warn',  # Don't fail on problematic lines
+                quotechar='"',        # Handle quoted fields properly
+                escapechar='\\',      # Handle escape sequences
+                low_memory=False,     # Avoid mixed type inference issues
+                skipinitialspace=True # Skip spaces after delimiter
+            )
+        except Exception as e1:
+            # Second attempt: Try with explicit delimiter and engine
+            try:
+                # Reset file position
+                file.seek(0)
+                df = pd.read_csv(
+                    file,
+                    encoding='utf-8',
+                    delimiter=',',
+                    engine='python',  # More flexible but slower engine
+                    on_bad_lines='skip',
+                    quoting=3,  # QUOTE_NONE
+                    skipinitialspace=True
+                )
+            except Exception as e2:
+                # Third attempt: Try reading with different encoding
+                try:
+                    file.seek(0)
+                    df = pd.read_csv(
+                        file,
+                        encoding='latin-1',  # Try alternate encoding
+                        delimiter=',', 
+                        engine='python',
+                        on_bad_lines='skip'
+                    )
+                except Exception as e3:
+                    # Last attempt: Try to manually read and parse the file
+                    file.seek(0)
+                    content = file.read().decode('utf-8', errors='replace')
+                    
+                    # Save content to StringIO for pandas to read
+                    string_data = io.StringIO(content)
+                    
+                    # Try to find the header row and parse from there
+                    lines = content.split('\n')
+                    header_idx = -1
+                    
+                    # Look for a row that likely contains the header
+                    for i, line in enumerate(lines):
+                        if 'First Name' in line and 'Last Name' in line and 'Email' in line:
+                            header_idx = i
+                            break
+                    
+                    if header_idx >= 0:
+                        # Create a new StringIO with just the header and data
+                        clean_content = '\n'.join(lines[header_idx:])
+                        clean_data = io.StringIO(clean_content)
+                        df = pd.read_csv(clean_data, on_bad_lines='skip')
+                    else:
+                        raise Exception("Could not identify header row in the CSV file")
+        
+        # Check if we have the minimum required columns
+        required_columns = ["First Name", "Last Name"]
+        
+        # Normalize column names by stripping whitespace and converting to title case
+        df.columns = [col.strip().title() for col in df.columns]
+        
+        # Check for required columns with normalized names
+        normalized_required = [col.strip().title() for col in required_columns]
+        missing_columns = [col for col in normalized_required if col not in df.columns]
+        
+        if missing_columns:
+            # Try to find columns with similar names
+            for missing in missing_columns:
+                for col in df.columns:
+                    # Check if the column name contains the required name (e.g. "First Name" in "First Name ")
+                    if missing.lower() in col.lower():
+                        # Rename the column to the standard name
+                        df = df.rename(columns={col: missing})
+        
+        # Recheck after attempted fixes
+        missing_columns = [col for col in normalized_required if col not in df.columns]
+        if missing_columns:
+            st.error(f"CSV file is missing required columns: {', '.join(missing_columns)}")
+            st.write("Available columns:", ", ".join(df.columns))
+            return []
+
+        # Show a preview of the data
+        with st.expander("Preview of imported connections data"):
+            st.write("First 5 rows of your connections data:")
+            st.dataframe(df.head())
+            st.write(f"Total connections found: {len(df)}")
+        
+        # Map common column variations to standard names
+        column_mapping = {
+            'First': 'First Name',
+            'Last': 'Last Name',
+            'E-Mail Address': 'Email Address',
+            'Email': 'Email Address',
+            'Position Title': 'Position',
+            'Company Name': 'Company',
+            'Connection Date': 'Connected On'
+        }
+        
+        # Apply column mapping where needed
+        for old_col, new_col in column_mapping.items():
+            if old_col in df.columns and new_col not in df.columns:
+                df = df.rename(columns={old_col: new_col})
+        
+        # Process the connections
         connections = []
         
         for idx, row in df.iterrows():
-            # Define expected columns and their fallbacks
-            first_name = row.get("First Name", "")
-            last_name = row.get("Last Name", "")
-            email = row.get("Email Address", "")
-            company = row.get("Company", "")
-            position = row.get("Position", "")
-            connected_on = row.get("Connected On", "")
+            # Define expected columns and their fallbacks with safe accessor
+            first_name = row.get('First Name', '') if hasattr(row, 'get') else str(row.get('First Name', '')) if 'First Name' in row.index else ''
+            last_name = str(row.get('Last Name', '')) if hasattr(row, 'get') else str(row.get('Last Name', '')) if 'Last Name' in row.index else ''
             
+            # Handle various email column names
+            email = ''
+            for email_col in ['Email Address', 'Email', 'E-Mail Address']:
+                if email_col in row.index:
+                    email = str(row.get(email_col, ''))
+                    break
+            
+            # Handle various company column names
+            company = ''
+            for company_col in ['Company', 'Company Name', 'Organization']:
+                if company_col in row.index:
+                    company = str(row.get(company_col, ''))
+                    break
+            
+            # Handle various position column names
+            position = ''
+            for position_col in ['Position', 'Position Title', 'Title', 'Headline']:
+                if position_col in row.index:
+                    position = str(row.get(position_col, ''))
+                    break
+            
+            # Handle various connection date column names
+            connected_on = ''
+            for date_col in ['Connected On', 'Connection Date', 'Connected']:
+                if date_col in row.index:
+                    connected_on = str(row.get(date_col, ''))
+                    break
+            
+            # Skip rows with empty first and last name (likely header or malformed rows)
+            if not first_name.strip() and not last_name.strip():
+                continue
+                
             # Create connection object with additional fields for our app
             connection = {
                 "id": str(idx),
@@ -239,6 +489,20 @@ def process_connections_csv(file):
         return connections
     except Exception as e:
         st.error(f"Error processing connections CSV: {str(e)}")
+        
+        # Additional debugging information
+        st.expander("Debugging Information").write(f"""
+        Error type: {type(e).__name__}
+        Error details: {str(e)}
+        
+        Common issues:
+        - CSV file format may not match expected LinkedIn export format
+        - Special characters or formatting issues in the file
+        - Missing required columns (First Name, Last Name)
+        
+        Try exporting your connections data again from LinkedIn, or check the file for formatting issues.
+        """)
+        
         return []
 
 def extract_industry(company, position):
