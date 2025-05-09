@@ -6,9 +6,9 @@ import random
 from datetime import datetime, timedelta
 import anthropic
 import time
-import requests
-from urllib.parse import urlencode
 from dotenv import load_dotenv
+import re
+import io
 
 # Load environment variables from .env file if present
 load_dotenv()
@@ -21,7 +21,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Function to initialize API clients
+# Function to initialize Claude API client
 def initialize_claude_client():
     api_key = st.session_state.get("CLAUDE_API_KEY", "")
     if not api_key:
@@ -33,26 +33,10 @@ def initialize_claude_client():
         st.error(f"Error initializing Claude client: {e}")
         return None
 
-def initialize_linkedin_client():
-    client_id = st.session_state.get("LINKEDIN_CLIENT_ID", "")
-    client_secret = st.session_state.get("LINKEDIN_CLIENT_SECRET", "")
-    redirect_uri = st.session_state.get("LINKEDIN_REDIRECT_URI", "http://localhost:8501/")
-    
-    if not client_id or not client_secret:
-        return None
-    
-    # LinkedIn client is more complex due to OAuth, but we'll simplify for this demo
-    # In a real app, you'd implement the full OAuth flow
-    return {
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "redirect_uri": redirect_uri
-    }
-
 # Initialize session state
 if "initialized" not in st.session_state:
     st.session_state.initialized = True
-    st.session_state.active_tab = "profile"
+    st.session_state.active_tab = "import"
     st.session_state.linkedin_connections = []
     st.session_state.selected_contact = None
     st.session_state.generated_message = ""
@@ -61,119 +45,17 @@ if "initialized" not in st.session_state:
     st.session_state.custom_topic = ""
     st.session_state.recommendations = []
     st.session_state.CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
-    st.session_state.LINKEDIN_CLIENT_ID = os.environ.get("LINKEDIN_CLIENT_ID", "")
-    st.session_state.LINKEDIN_CLIENT_SECRET = os.environ.get("LINKEDIN_CLIENT_SECRET", "")
-    st.session_state.LINKEDIN_REDIRECT_URI = os.environ.get("LINKEDIN_REDIRECT_URI", "http://localhost:8501/")
-    st.session_state.linkedin_access_token = ""
-    st.session_state.linkedin_connected = False
+    st.session_state.profile_uploaded = False
+    st.session_state.connections_uploaded = False
     st.session_state.user_profile = {
-        "name": "Jamie Doe",
-        "currentRole": "Software Engineer",
-        "industry": "Technology",
-        "expertise": "React, Node.js, AI",
-        "interests": "Machine Learning, Web Development, Open Source",
-        "company": "TechCorp Inc.",
-        "location": "San Francisco, CA",
-        "headline": "Software Engineer | Full Stack Developer | AI Enthusiast"
+        "name": "",
+        "firstName": "",
+        "lastName": "",
+        "headline": "",
+        "industry": "",
+        "summary": "",
+        "location": ""
     }
-
-# Sample LinkedIn connections data (for demonstration)
-sample_connections = [
-    {
-        "id": "abc123",
-        "firstName": "Jordan",
-        "lastName": "Smith",
-        "role": "Product Manager",
-        "industry": "Technology",
-        "company": "InnovateTech",
-        "expertise": "Product Strategy, UX, Agile",
-        "seniority": "Senior",
-        "companySize": "Enterprise",
-        "companyPrestige": "High",
-        "activityLevel": "High",
-        "recentProjects": "AI Product Launch, Platform Redesign",
-        "keyAchievements": "Grew user base by 200%",
-        "recentActivity": {"type": "post", "topic": "AI ethics", "date": (datetime.now() - timedelta(days=3)).isoformat()},
-        "mutualConnections": 3,
-        "profileUrl": "https://linkedin.com/in/jordan-smith"
-    },
-    {
-        "id": "def456",
-        "firstName": "Taylor",
-        "lastName": "Wong",
-        "role": "Engineering Director",
-        "industry": "Software",
-        "company": "CodeCorp",
-        "expertise": "Cloud Architecture, Microservices, DevOps",
-        "seniority": "Director",
-        "companySize": "Mid-size",
-        "companyPrestige": "Medium",
-        "activityLevel": "Medium",
-        "recentProjects": "Microservices Migration, CI/CD Pipeline",
-        "keyAchievements": "Reduced infrastructure costs by 40%",
-        "recentActivity": {"type": "article", "topic": "serverless architecture", "date": (datetime.now() - timedelta(days=10)).isoformat()},
-        "mutualConnections": 1,
-        "profileUrl": "https://linkedin.com/in/taylor-wong"
-    },
-    {
-        "id": "ghi789",
-        "firstName": "Alex",
-        "lastName": "Johnson",
-        "role": "Marketing Manager",
-        "industry": "E-commerce",
-        "company": "ShopDirect",
-        "expertise": "Growth Marketing, SEO, Analytics",
-        "seniority": "Manager",
-        "companySize": "Startup",
-        "companyPrestige": "Medium",
-        "activityLevel": "High",
-        "recentProjects": "Influencer Campaign, Content Strategy",
-        "keyAchievements": "Doubled conversion rate in 3 months",
-        "recentActivity": {"type": "post", "topic": "conversion optimization", "date": (datetime.now() - timedelta(days=5)).isoformat()},
-        "mutualConnections": 0,
-        "profileUrl": "https://linkedin.com/in/alex-johnson"
-    },
-    {
-        "id": "jkl012",
-        "firstName": "Morgan",
-        "lastName": "Lee",
-        "role": "Data Scientist",
-        "industry": "Finance",
-        "company": "DataBank",
-        "expertise": "Predictive Analytics, Machine Learning, Python",
-        "seniority": "Senior",
-        "companySize": "Large",
-        "companyPrestige": "High",
-        "activityLevel": "Medium",
-        "recentProjects": "Fraud Detection System, Risk Modeling",
-        "keyAchievements": "Reduced false positives by 75%",
-        "recentActivity": {"type": "article", "topic": "ML in finance", "date": (datetime.now() - timedelta(days=15)).isoformat()},
-        "mutualConnections": 2,
-        "profileUrl": "https://linkedin.com/in/morgan-lee"
-    },
-    {
-        "id": "mno345",
-        "firstName": "Casey",
-        "lastName": "Rivera",
-        "role": "UX Designer",
-        "industry": "Technology",
-        "company": "DesignWorks",
-        "expertise": "User Research, Interaction Design, Prototyping",
-        "seniority": "Mid Level",
-        "companySize": "Agency",
-        "companyPrestige": "Medium",
-        "activityLevel": "High",
-        "recentProjects": "Mobile App Redesign, Design System",
-        "keyAchievements": "Increased user engagement by 150%",
-        "recentActivity": {"type": "post", "topic": "inclusive design", "date": (datetime.now() - timedelta(days=2)).isoformat()},
-        "mutualConnections": 5,
-        "profileUrl": "https://linkedin.com/in/casey-rivera"
-    }
-]
-
-# Load sample connections if empty
-if len(st.session_state.linkedin_connections) == 0:
-    st.session_state.linkedin_connections = sample_connections
 
 # Custom CSS for styling
 st.markdown("""
@@ -240,10 +122,6 @@ st.markdown("""
     .stButton>button {
         width: 100%;
     }
-    .linkedin-button>button {
-        background-color: #0A66C2 !important;
-        color: white !important;
-    }
     .contact-detail {
         margin-bottom: 0.5rem;
     }
@@ -279,76 +157,182 @@ st.markdown("""
         font-size: 0.8rem;
         margin-top: 0.5rem;
     }
+    .upload-card {
+        border: 1px dashed #0A66C2;
+        border-radius: 0.5rem;
+        padding: 1.5rem;
+        margin: 1rem 0;
+        text-align: center;
+    }
+    .success-card {
+        background-color: #D1FAE5;
+        border-radius: 0.5rem;
+        padding: 1rem;
+        margin: 1rem 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# API Functions for LinkedIn Integration
-def get_linkedin_auth_url():
-    """Generate LinkedIn OAuth URL"""
-    client_id = st.session_state.LINKEDIN_CLIENT_ID
-    redirect_uri = st.session_state.LINKEDIN_REDIRECT_URI
-    scopes = "r_liteprofile,r_emailaddress,r_1st_connections_size"
-    
-    params = {
-        "response_type": "code",
-        "client_id": client_id,
-        "redirect_uri": redirect_uri,
-        "scope": scopes,
-        "state": "random_state_string"  # In a real app, use a secure random string
-    }
-    
-    return f"https://www.linkedin.com/oauth/v2/authorization?{urlencode(params)}"
+# Helper Functions for CSV processing
+def process_profile_csv(file):
+    """Process LinkedIn Profile.csv file"""
+    try:
+        df = pd.read_csv(file)
+        if len(df) > 0:
+            # Extract first row since there should be only one profile
+            profile_data = df.iloc[0].to_dict()
+            
+            user_profile = {
+                "firstName": profile_data.get("First Name", ""),
+                "lastName": profile_data.get("Last Name", ""),
+                "name": f"{profile_data.get('First Name', '')} {profile_data.get('Last Name', '')}".strip(),
+                "headline": profile_data.get("Headline", ""),
+                "summary": profile_data.get("Summary", ""),
+                "industry": profile_data.get("Industry", ""),
+                "location": profile_data.get("Geo Location", "")
+            }
+            return user_profile
+        else:
+            st.error("Profile CSV file is empty")
+            return None
+    except Exception as e:
+        st.error(f"Error processing profile CSV: {str(e)}")
+        return None
 
-def exchange_code_for_token(code):
-    """Exchange authorization code for access token"""
-    # In a real app, this would make an actual API call
-    # This is simulated for demo purposes
-    
-    # Simulate successful token exchange
-    return {
-        "access_token": "simulated_access_token",
-        "expires_in": 3600,
-        "refresh_token": "simulated_refresh_token"
-    }
+def process_connections_csv(file):
+    """Process LinkedIn Connections.csv file"""
+    try:
+        df = pd.read_csv(file)
+        connections = []
+        
+        for idx, row in df.iterrows():
+            # Define expected columns and their fallbacks
+            first_name = row.get("First Name", "")
+            last_name = row.get("Last Name", "")
+            email = row.get("Email Address", "")
+            company = row.get("Company", "")
+            position = row.get("Position", "")
+            connected_on = row.get("Connected On", "")
+            
+            # Create connection object with additional fields for our app
+            connection = {
+                "id": str(idx),
+                "firstName": first_name,
+                "lastName": last_name,
+                "fullName": f"{first_name} {last_name}".strip(),
+                "email": email,
+                "company": company,
+                "role": position,
+                # Generate some additional fields with reasonable defaults
+                "industry": extract_industry(company, position),
+                "expertise": extract_expertise(position),
+                "seniority": extract_seniority(position),
+                "companySize": "Unknown",
+                "activityLevel": random.choice(["Low", "Medium", "High"]),
+                "recentProjects": "",
+                "keyAchievements": "",
+                "connectedDate": connected_on,
+                "mutualConnections": random.randint(0, 5),
+            }
+            connections.append(connection)
+        
+        return connections
+    except Exception as e:
+        st.error(f"Error processing connections CSV: {str(e)}")
+        return []
 
-def get_linkedin_profile(access_token):
-    """Get user's LinkedIn profile"""
-    # In a real app, this would make an actual API call
-    # This is simulated for demo purposes
+def extract_industry(company, position):
+    """Extract likely industry based on company name and position"""
+    # This is a very simplified version - in a real app, you would use NLP or a database
     
-    # Return simulated profile data
-    if "linkedin_profile" not in st.session_state:
-        # Create a default profile first time
-        st.session_state.linkedin_profile = {
-            "id": "user123",
-            "firstName": st.session_state.user_profile["name"].split()[0],
-            "lastName": st.session_state.user_profile["name"].split()[-1] if len(st.session_state.user_profile["name"].split()) > 1 else "",
-            "headline": st.session_state.user_profile["headline"],
-            "industryName": st.session_state.user_profile["industry"],
-            "location": st.session_state.user_profile["location"],
-            "positions": [
-                {
-                    "title": st.session_state.user_profile["currentRole"],
-                    "companyName": st.session_state.user_profile["company"]
-                }
-            ]
-        }
+    # Check for common industry keywords in company and position
+    text = (company + " " + position).lower()
     
-    return st.session_state.linkedin_profile
+    if any(tech in text for tech in ["tech", "software", "digital", "app", "data", "it ", "computer", "cyber", "web", "cloud"]):
+        return "Technology"
+    elif any(fin in text for fin in ["bank", "finance", "capital", "financial", "invest", "asset", "wealth", "insurance"]):
+        return "Finance"
+    elif any(health in text for health in ["health", "medical", "hospital", "pharma", "biotech", "care", "clinic"]):
+        return "Healthcare"
+    elif any(edu in text for edu in ["university", "college", "school", "education", "academic", "learning", "teaching"]):
+        return "Education"
+    elif any(mkt in text for mkt in ["marketing", "advertis", "media", "digital", "brand", "content", "creative"]):
+        return "Marketing"
+    elif any(retail in text for retail in ["retail", "shop", "store", "ecommerce", "commerce", "consumer"]):
+        return "Retail"
+    else:
+        return "Other"
 
-def get_linkedin_connections(access_token):
-    """Get user's LinkedIn connections"""
-    # In a real app, this would make an actual API call
-    # This is simulated for demo purposes
+def extract_expertise(position):
+    """Extract expertise areas based on job position"""
+    # This is a simplified version - in a real app, you would use more sophisticated NLP
     
-    # For demo, we'll use our sample connections
-    return sample_connections
+    position_lower = position.lower()
+    
+    # Check for engineering/technical roles
+    if any(eng in position_lower for eng in ["engineer", "developer", "architect", "programmer"]):
+        if "software" in position_lower or "web" in position_lower:
+            return "Software Development, Engineering"
+        elif "data" in position_lower:
+            return "Data Engineering, Analytics"
+        elif "cloud" in position_lower:
+            return "Cloud Infrastructure, DevOps"
+        else:
+            return "Engineering, Technical Development"
+    
+    # Check for data/analytics roles
+    elif any(data in position_lower for data in ["data", "analytics", "analyst", "scientist"]):
+        return "Data Analysis, Business Intelligence"
+    
+    # Check for design roles
+    elif any(design in position_lower for design in ["design", "ux", "ui", "user experience"]):
+        return "UX/UI Design, Product Design"
+    
+    # Check for product roles
+    elif any(product in position_lower for product in ["product manager", "product owner"]):
+        return "Product Management, Strategy"
+    
+    # Check for marketing roles
+    elif any(mkt in position_lower for mkt in ["market", "brand", "content", "seo", "growth"]):
+        return "Marketing, Branding, Growth"
+    
+    # Check for sales roles
+    elif any(sales in position_lower for sales in ["sales", "account", "business development"]):
+        return "Sales, Business Development"
+    
+    # Check for management roles
+    elif any(mgmt in position_lower for mgmt in ["manager", "director", "head of", "lead"]):
+        return "Management, Leadership"
+    
+    else:
+        return "Professional Services"
+
+def extract_seniority(position):
+    """Extract seniority level based on job position"""
+    position_lower = position.lower()
+    
+    if any(exec_title in position_lower for exec_title in ["ceo", "cto", "cfo", "coo", "chief", "president", "founder"]):
+        return "C-Suite"
+    elif any(vp in position_lower for vp in ["vp", "vice president"]):
+        return "VP"
+    elif any(dir in position_lower for dir in ["director", "head of"]):
+        return "Director"
+    elif any(mgr in position_lower for mgr in ["manager", "lead", "principal"]):
+        return "Manager"
+    elif any(senior in position_lower for senior in ["senior", "sr.", "staff"]):
+        return "Senior"
+    elif any(junior in position_lower for junior in ["junior", "jr.", "associate"]):
+        return "Entry Level"
+    elif any(intern in position_lower for intern in ["intern", "trainee"]):
+        return "Intern"
+    else:
+        return "Mid Level"
 
 # Helper Functions
 def generate_recommendations(count=5):
     """Generate AI-powered contact recommendations"""
-    # In a real app, this would use more sophisticated algorithms
-    # We'll simulate this with random scores and insights based on networking goal
+    if not st.session_state.linkedin_connections:
+        return []
     
     scored_contacts = []
     
@@ -357,25 +341,25 @@ def generate_recommendations(count=5):
         base_score = 50  # Base score
         
         # Industry match bonus
-        if contact["industry"] == st.session_state.user_profile["industry"]:
+        if contact.get("industry") == st.session_state.user_profile.get("industry"):
             base_score += 20
         
         # Seniority bonus based on networking goal
-        if st.session_state.networking_goal == "Career Advancement" and contact["seniority"] in ["Senior", "Manager", "Director", "VP"]:
+        if st.session_state.networking_goal == "Career Advancement" and contact.get("seniority") in ["Senior", "Manager", "Director", "VP"]:
             base_score += 15
-        elif st.session_state.networking_goal == "Industry Knowledge" and contact["seniority"] in ["Senior", "Manager", "Director"]:
+        elif st.session_state.networking_goal == "Industry Knowledge" and contact.get("seniority") in ["Senior", "Manager", "Director"]:
             base_score += 15
-        elif st.session_state.networking_goal == "Business Development" and contact["seniority"] in ["Manager", "Director", "VP", "C-Suite"]:
+        elif st.session_state.networking_goal == "Business Development" and contact.get("seniority") in ["Manager", "Director", "VP", "C-Suite"]:
             base_score += 15
-        elif st.session_state.networking_goal == "Job Seeking" and contact["seniority"] in ["Manager", "Director", "VP"]:
+        elif st.session_state.networking_goal == "Job Seeking" and contact.get("seniority") in ["Manager", "Director", "VP"]:
             base_score += 20
         
         # Activity level bonus
-        if contact["activityLevel"] == "High":
+        if contact.get("activityLevel") == "High":
             base_score += 10
         
         # Mutual connections bonus
-        base_score += min(contact["mutualConnections"] * 3, 15)
+        base_score += min(contact.get("mutualConnections", 0) * 3, 15)
         
         # Add some randomness
         score = min(max(base_score + random.randint(-5, 5), 40), 95)
@@ -384,49 +368,46 @@ def generate_recommendations(count=5):
         insights = []
         
         # Common insights for all goals
-        if contact["industry"] == st.session_state.user_profile["industry"]:
-            insights.append(f"Same industry ({contact['industry']})")
+        if contact.get("industry") == st.session_state.user_profile.get("industry"):
+            insights.append(f"Same industry ({contact.get('industry')})")
         
-        if contact["mutualConnections"] > 0:
-            insights.append(f"{contact['mutualConnections']} mutual connections")
+        if contact.get("mutualConnections", 0) > 0:
+            insights.append(f"{contact.get('mutualConnections')} mutual connections")
         
         # Goal-specific insights
         if st.session_state.networking_goal == "Career Advancement":
-            if contact["seniority"] in ["Senior", "Manager", "Director", "VP"]:
-                insights.append(f"Senior position ({contact['seniority']}) for career guidance")
+            if contact.get("seniority") in ["Senior", "Manager", "Director", "VP"]:
+                insights.append(f"Senior position ({contact.get('seniority')}) for career guidance")
             
-            if "expertise" in contact and st.session_state.user_profile["expertise"] in contact["expertise"]:
-                insights.append(f"Shares your expertise in {st.session_state.user_profile['expertise'].split(',')[0]}")
+            if contact.get("expertise") and st.session_state.user_profile.get("headline") and any(exp in st.session_state.user_profile.get("headline") for exp in contact.get("expertise").split(",")):
+                insights.append(f"Shares your expertise in {contact.get('expertise').split(',')[0]}")
         
         elif st.session_state.networking_goal == "Industry Knowledge":
-            if "expertise" in contact:
-                expertise = contact["expertise"].split(",")[0].strip() if "," in contact["expertise"] else contact["expertise"]
+            if contact.get("expertise"):
+                expertise = contact.get("expertise").split(",")[0].strip() if "," in contact.get("expertise") else contact.get("expertise")
                 insights.append(f"Expert in {expertise}")
-            
-            if "recentActivity" in contact and contact["recentActivity"]["type"] == "article":
-                insights.append(f"Creates content about {contact['recentActivity']['topic']}")
         
         elif st.session_state.networking_goal == "Business Development":
-            if contact["seniority"] in ["Manager", "Director", "VP", "C-Suite"]:
-                insights.append(f"Decision maker ({contact['seniority']})")
+            if contact.get("seniority") in ["Manager", "Director", "VP", "C-Suite"]:
+                insights.append(f"Decision maker ({contact.get('seniority')})")
             
-            if contact["companySize"] in ["Large", "Enterprise"]:
-                insights.append(f"Works at {contact['companySize']} company")
+            if contact.get("companySize") in ["Large", "Enterprise"]:
+                insights.append(f"Works at {contact.get('companySize')} company")
         
         elif st.session_state.networking_goal == "Job Seeking":
-            if contact["seniority"] in ["Manager", "Director", "VP"]:
-                insights.append(f"Hiring authority ({contact['seniority']})")
+            if contact.get("seniority") in ["Manager", "Director", "VP"]:
+                insights.append(f"Hiring authority ({contact.get('seniority')})")
             
-            if contact["company"]:
-                insights.append(f"Works at target company ({contact['company']})")
+            if contact.get("company"):
+                insights.append(f"Works at target company ({contact.get('company')})")
         
         # Fill with more generic insights if needed
         if len(insights) < 2:
             potential_insights = [
-                f"Experienced in {contact['expertise'].split(',')[0] if ',' in contact['expertise'] else contact['expertise']}",
-                f"Works at {contact['company']} ({contact['companySize']})",
-                f"{contact['seniority']} level professional",
-                f"Achievement: {contact['keyAchievements']}"
+                f"Experienced in {contact.get('expertise').split(',')[0] if contact.get('expertise') and ',' in contact.get('expertise') else contact.get('expertise', 'professional skills')}",
+                f"Works at {contact.get('company', 'a company')}",
+                f"{contact.get('seniority', 'Professional')} level position",
+                f"Connected on {contact.get('connectedDate', 'LinkedIn')}"
             ]
             insights.extend(random.sample(potential_insights, min(2, len(potential_insights))))
         
@@ -460,61 +441,53 @@ def generate_conversation_starters(contact):
     """Generate conversation starters for a contact"""
     starters = []
     
-    # Based on recent activity
-    if "recentActivity" in contact and contact["recentActivity"]:
-        if contact["recentActivity"]["type"] == "post":
-            starters.append(f"I noticed your recent post about {contact['recentActivity']['topic']}. What sparked your interest in this area?")
-        elif contact["recentActivity"]["type"] == "article":
-            starters.append(f"I read your article on {contact['recentActivity']['topic']}. Your perspective was thought-provoking.")
-    
-    # Based on career achievements
-    if "keyAchievements" in contact and contact["keyAchievements"]:
-        starters.append(f"Your achievement in {contact['keyAchievements']} is impressive. I'd love to hear more about your approach.")
+    # Based on connected date
+    if contact.get("connectedDate"):
+        starters.append(f"We've been connected since {contact.get('connectedDate')}. I've been following your career journey and I'm impressed with your work at {contact.get('company', 'your company')}.")
     
     # Based on shared industry
-    if contact["industry"] == st.session_state.user_profile["industry"]:
-        industry = contact["industry"]
+    if contact.get("industry") == st.session_state.user_profile.get("industry"):
+        industry = contact.get("industry")
         industry_topics = {
             "Technology": ["AI advancements", "remote work technologies", "cybersecurity trends"],
             "Finance": ["fintech innovations", "sustainable investing", "regulatory changes"],
-            "E-commerce": ["omnichannel strategies", "customer retention", "logistics optimization"],
-            "Software": ["cloud architecture", "no-code platforms", "developer experience"]
+            "Retail": ["omnichannel strategies", "customer retention", "logistics optimization"],
+            "Healthcare": ["telehealth adoption", "patient experience", "healthcare innovation"]
         }
         topics = industry_topics.get(industry, ["industry innovations", "current challenges", "future trends"])
         topic = random.choice(topics)
         starters.append(f"As fellow professionals in {industry}, I'm curious about your thoughts on {topic}.")
     
-    # Based on recent projects
-    if "recentProjects" in contact and contact["recentProjects"]:
-        projects = contact["recentProjects"].split(",")
-        project = projects[0].strip()
-        starters.append(f"I found your work on {project} interesting. What inspired you to take on that project?")
+    # Based on role/expertise
+    if contact.get("role") and contact.get("expertise"):
+        expertise = contact.get("expertise").split(",")[0].strip() if "," in contact.get("expertise") else contact.get("expertise")
+        starters.append(f"Your experience as a {contact.get('role')} with expertise in {expertise} is impressive. What projects in this area have you found most fulfilling?")
     
     # Based on mutual connections
-    if contact["mutualConnections"] > 0:
-        starters.append(f"I noticed we have {contact['mutualConnections']} shared connections. The industry community is smaller than it seems!")
+    if contact.get("mutualConnections", 0) > 0:
+        starters.append(f"I noticed we have {contact.get('mutualConnections')} mutual connections. The professional community is smaller than it seems!")
     
     # Add goal-specific starters
     if st.session_state.networking_goal == "Career Advancement":
-        starters.append(f"I'm focusing on advancing my career in {contact['industry']}. What helped you reach your current position as {contact['role']}?")
+        starters.append(f"I'm focusing on advancing my career in {contact.get('industry', 'our industry')}. What helped you reach your current position as {contact.get('role', 'a professional')}?")
     
     elif st.session_state.networking_goal == "Industry Knowledge":
-        expertise = contact["expertise"].split(",")[0].strip() if "," in contact["expertise"] else contact["expertise"]
+        expertise = contact.get("expertise", "professional expertise").split(",")[0].strip() if contact.get("expertise") and "," in contact.get("expertise") else contact.get("expertise", "your field")
         starters.append(f"I'm working to deepen my understanding of {expertise}. What resources or practices have been most valuable for your development in this area?")
     
     elif st.session_state.networking_goal == "Business Development":
-        starters.append(f"I'm exploring potential synergies between organizations in our space. Would you be open to discussing how {contact['company']} approaches partnerships?")
+        starters.append(f"I'm exploring potential synergies between organizations in our space. Would you be open to discussing how {contact.get('company', 'your company')} approaches partnerships?")
     
     elif st.session_state.networking_goal == "Job Seeking":
-        starters.append(f"I'm currently exploring new opportunities in {contact['industry']}. Would you have any insights on what {contact['company']} values most in candidates?")
+        starters.append(f"I'm currently exploring new opportunities in {contact.get('industry', 'our industry')}. Would you have any insights on what {contact.get('company', 'companies in this space')} values most in candidates?")
     
     # Add generic starters if we don't have enough
     generic_starters = [
         "What's the most interesting project you've worked on recently?",
-        f"What aspect of your work in {contact['industry']} do you find most fulfilling?",
-        f"How did you first become interested in {contact['industry']}?",
-        f"What's one challenge in {contact['industry']} that isn't getting enough attention?",
-        f"What skills do you think will be most important for professionals in {contact['industry']} in the next few years?"
+        f"What aspect of your work in {contact.get('industry', 'your field')} do you find most fulfilling?",
+        f"How did you first become interested in {contact.get('industry', 'your field')}?",
+        f"What's one challenge in {contact.get('industry', 'the industry')} that isn't getting enough attention?",
+        f"What skills do you think will be most important for professionals in {contact.get('industry', 'our field')} in the next few years?"
     ]
     
     while len(starters) < 3:
@@ -528,14 +501,14 @@ def generate_basic_message(contact, template_type="coldOutreach", custom_topic="
     """Generate a basic outreach message without using Claude AI"""
     # Create a replacement dictionary
     replacements = {
-        "{{firstName}}": contact["firstName"],
-        "{{industry}}": contact["industry"],
-        "{{company}}": contact["company"],
-        "{{expertise}}": contact["expertise"].split(",")[0] if "," in contact["expertise"] else contact["expertise"],
-        "{{userRole}}": st.session_state.user_profile["currentRole"],
-        "{{userExpertise}}": st.session_state.user_profile["expertise"],
-        "{{userName}}": st.session_state.user_profile["name"],
-        "{{specificTopic}}": custom_topic if custom_topic else f"{contact['expertise'].split(',')[0] if ',' in contact['expertise'] else contact['expertise']} in {contact['industry']}"
+        "{{firstName}}": contact.get("firstName", ""),
+        "{{industry}}": contact.get("industry", "our industry"),
+        "{{company}}": contact.get("company", "your company"),
+        "{{expertise}}": contact.get("expertise", "your professional expertise").split(",")[0] if contact.get("expertise") and "," in contact.get("expertise") else contact.get("expertise", "your expertise"),
+        "{{userRole}}": st.session_state.user_profile.get("headline", "").split(" at ")[0] if " at " in st.session_state.user_profile.get("headline", "") else st.session_state.user_profile.get("headline", "professional"),
+        "{{userExpertise}}": extract_expertise_from_headline(st.session_state.user_profile.get("headline", "")),
+        "{{userName}}": st.session_state.user_profile.get("name", ""),
+        "{{specificTopic}}": custom_topic if custom_topic else f"{contact.get('expertise', 'your expertise').split(',')[0] if contact.get('expertise') and ',' in contact.get('expertise') else contact.get('expertise', 'your field')} in {contact.get('industry', 'the industry')}"
     }
     
     # Add goal-specific replacements
@@ -617,6 +590,31 @@ Best regards,
     
     return template
 
+def extract_expertise_from_headline(headline):
+    """Extract expertise from LinkedIn headline"""
+    if not headline:
+        return "professional skills"
+    
+    # Remove the company part if present
+    if " at " in headline:
+        headline = headline.split(" at ")[0]
+    
+    # Common patterns in headlines
+    if "|" in headline:
+        # Extract skills from pipe-separated format (e.g., "Software Engineer | Python | AWS | Machine Learning")
+        parts = [part.strip() for part in headline.split("|")]
+        if len(parts) > 1:
+            return ", ".join(parts[1:3])  # Take up to 2 skills
+    
+    if "," in headline:
+        # Extract skills from comma-separated format
+        parts = [part.strip() for part in headline.split(",")]
+        if len(parts) > 1:
+            return ", ".join(parts[1:3])  # Take up to 2 skills
+    
+    # If no structure is found, return the headline as is or a generic expertise
+    return headline or "professional skills"
+
 def generate_claude_message(contact, template_type="coldOutreach", custom_topic=""):
     """Generate a message using Claude AI"""
     client = initialize_claude_client()
@@ -649,33 +647,25 @@ Craft a message that is:
 Return only the text of the message itself, without any explanation or commentary."""
 
         # Create a detailed prompt with all the context
-        specific_topic = custom_topic if custom_topic else f"{contact['expertise'].split(',')[0] if ',' in contact['expertise'] else contact['expertise']}"
+        specific_topic = custom_topic if custom_topic else f"{contact.get('expertise', 'your field').split(',')[0] if contact.get('expertise') and ',' in contact.get('expertise') else contact.get('expertise', 'your field')}"
         
-        user_prompt = f"""Create a personalized LinkedIn {template_type} message to {contact['firstName']} {contact['lastName']}.
+        user_prompt = f"""Create a personalized LinkedIn {template_type} message to {contact.get('firstName', '')} {contact.get('lastName', '')}.
 
 RECIPIENT'S PROFILE:
-- Name: {contact['firstName']} {contact['lastName']}
-- Role: {contact['role']}
-- Company: {contact['company']}
-- Industry: {contact['industry']}
-- Expertise: {contact['expertise']}
-- Seniority: {contact['seniority']}
-- Recent Projects: {contact['recentProjects']}
-- Key Achievements: {contact['keyAchievements']}
-- Mutual Connections: {contact['mutualConnections']}
-"""
+- Name: {contact.get('firstName', '')} {contact.get('lastName', '')}
+- Role: {contact.get('role', 'Professional')}
+- Company: {contact.get('company', 'their company')}
+- Industry: {contact.get('industry', 'their industry')}
+- Expertise: {contact.get('expertise', 'their expertise')}
+- Seniority: {contact.get('seniority', 'professional')}
+- Connected on LinkedIn since: {contact.get('connectedDate', 'some time ago')}
+- Mutual Connections: {contact.get('mutualConnections', 0)}
 
-        if "recentActivity" in contact and contact["recentActivity"]:
-            user_prompt += f"- Recent Activity: {contact['recentActivity']['type']} about {contact['recentActivity']['topic']}\n"
-
-        user_prompt += f"""
 SENDER'S PROFILE:
-- Name: {st.session_state.user_profile['name']}
-- Role: {st.session_state.user_profile['currentRole']}
-- Industry: {st.session_state.user_profile['industry']}
-- Expertise: {st.session_state.user_profile['expertise']}
-- Company: {st.session_state.user_profile['company']}
-- Headline: {st.session_state.user_profile['headline']}
+- Name: {st.session_state.user_profile.get('name', '')}
+- Role/Headline: {st.session_state.user_profile.get('headline', '')}
+- Industry: {st.session_state.user_profile.get('industry', '')}
+- Summary: {st.session_state.user_profile.get('summary', '')[:200] + '...' if st.session_state.user_profile.get('summary') and len(st.session_state.user_profile.get('summary')) > 200 else st.session_state.user_profile.get('summary', '')}
 
 MESSAGE DETAILS:
 - Message Type: {template_type}
@@ -737,15 +727,15 @@ Provide your analysis in JSON format with these fields:
 
 Return ONLY the JSON object without any additional text or explanation."""
 
-        user_prompt = f"""Analyze this LinkedIn networking outreach message to {contact['firstName']} {contact['lastName']}, who is a {contact['role']} at {contact['company']} in the {contact['industry']} industry:
+        user_prompt = f"""Analyze this LinkedIn networking outreach message to {contact.get('firstName', '')} {contact.get('lastName', '')}, who is a {contact.get('role', 'professional')} at {contact.get('company', 'their company')} in the {contact.get('industry', 'their industry')} industry:
 
 MESSAGE:
 {message}
 
 RECIPIENT CONTEXT:
-- Expertise: {contact['expertise']}
-- Seniority: {contact['seniority']}
-- Recent Projects: {contact['recentProjects']}
+- Expertise: {contact.get('expertise', 'their expertise')}
+- Seniority: {contact.get('seniority', 'professional')}
+- Connected On: {contact.get('connectedDate', 'some time ago')}
 
 SENDER GOAL:
 - Networking Goal: {st.session_state.networking_goal}
@@ -823,26 +813,23 @@ Focus on enhancing:
 
 Return ONLY the improved message text without any explanation or commentary about your changes."""
 
-        user_prompt = f"""Improve this LinkedIn networking outreach message to {contact['firstName']} {contact['lastName']}, who is a {contact['role']} at {contact['company']} in the {contact['industry']} industry:
+        user_prompt = f"""Improve this LinkedIn networking outreach message to {contact.get('firstName', '')} {contact.get('lastName', '')}, who is a {contact.get('role', 'professional')} at {contact.get('company', 'their company')} in the {contact.get('industry', 'their industry')} industry:
 
 ORIGINAL MESSAGE:
 {message}
 
 RECIPIENT DETAILS:
-- Expertise: {contact['expertise']}
-- Seniority: {contact['seniority']}
-- Recent Projects: {contact['recentProjects']}
-- Key Achievements: {contact['keyAchievements']}
+- Expertise: {contact.get('expertise', 'their expertise')}
+- Seniority: {contact.get('seniority', 'professional')}
+- Connected On: {contact.get('connectedDate', 'some time ago')}
+- Mutual Connections: {contact.get('mutualConnections', 0)}
 """
-
-        if "recentActivity" in contact and contact["recentActivity"]:
-            user_prompt += f"- Recent Activity: {contact['recentActivity']['type']} about {contact['recentActivity']['topic']}\n"
 
         user_prompt += f"""
 SENDER DETAILS:
-- Name: {st.session_state.user_profile['name']}
-- Role: {st.session_state.user_profile['currentRole']}
-- Expertise: {st.session_state.user_profile['expertise']}
+- Name: {st.session_state.user_profile.get('name', '')}
+- Role/Headline: {st.session_state.user_profile.get('headline', '')}
+- Industry: {st.session_state.user_profile.get('industry', '')}
 - Networking Goal: {st.session_state.networking_goal}
 
 Improve this message while keeping its core intent. Return only the improved message text."""
@@ -870,47 +857,6 @@ Improve this message while keeping its core intent. Return only the improved mes
 with st.sidebar:
     st.markdown("<div class='main-header'>🤝 LinkedIn AI Networking Assistant</div>", unsafe_allow_html=True)
     
-    # LinkedIn API Setup
-    st.markdown("### LinkedIn API Configuration")
-    linkedin_client_id = st.text_input(
-        "LinkedIn Client ID", 
-        value=st.session_state.LINKEDIN_CLIENT_ID,
-        type="password",
-        help="Required for LinkedIn profile and connections access"
-    )
-    
-    if linkedin_client_id != st.session_state.LINKEDIN_CLIENT_ID:
-        st.session_state.LINKEDIN_CLIENT_ID = linkedin_client_id
-    
-    linkedin_client_secret = st.text_input(
-        "LinkedIn Client Secret", 
-        value=st.session_state.LINKEDIN_CLIENT_SECRET,
-        type="password",
-        help="Required for LinkedIn authentication"
-    )
-    
-    if linkedin_client_secret != st.session_state.LINKEDIN_CLIENT_SECRET:
-        st.session_state.LINKEDIN_CLIENT_SECRET = linkedin_client_secret
-    
-    # Only show redirect URI if client ID and secret are provided
-    if st.session_state.LINKEDIN_CLIENT_ID and st.session_state.LINKEDIN_CLIENT_SECRET:
-        linkedin_redirect_uri = st.text_input(
-            "LinkedIn Redirect URI", 
-            value=st.session_state.LINKEDIN_REDIRECT_URI,
-            help="The callback URL for OAuth authentication"
-        )
-        
-        if linkedin_redirect_uri != st.session_state.LINKEDIN_REDIRECT_URI:
-            st.session_state.LINKEDIN_REDIRECT_URI = linkedin_redirect_uri
-    
-    # API info
-    if not st.session_state.LINKEDIN_CLIENT_ID or not st.session_state.LINKEDIN_CLIENT_SECRET:
-        st.markdown(
-            "<div class='api-info'>LinkedIn API credentials required for full functionality. "
-            "For demo purposes, sample connections will be used.</div>",
-            unsafe_allow_html=True
-        )
-    
     # Claude API Key input
     st.markdown("### Claude AI Integration")
     api_key_input = st.text_input(
@@ -929,51 +875,35 @@ with st.sidebar:
             unsafe_allow_html=True
         )
     
-    # LinkedIn Connect button
-    st.markdown("### LinkedIn Connection")
-    
-    linkedin_client = initialize_linkedin_client()
-    
-    if not linkedin_client:
-        st.warning("Configure LinkedIn API credentials to connect your account.")
-    else:
-        if not st.session_state.linkedin_connected:
-            linkedin_connect = st.button("Connect to LinkedIn", key="linkedin_connect")
-            
-            if linkedin_connect:
-                # In a real app, this would redirect to LinkedIn OAuth
-                # For demo, we'll simulate successful connection
-                st.session_state.linkedin_connected = True
-                st.session_state.linkedin_access_token = "simulated_access_token"
-                st.success("Connected to LinkedIn (simulated for demo)")
-                
-                # Get profile and connections
-                st.session_state.user_profile = get_linkedin_profile(st.session_state.linkedin_access_token)
-                st.session_state.linkedin_connections = get_linkedin_connections(st.session_state.linkedin_access_token)
-                
-                # Refresh recommendations
-                st.session_state.recommendations = generate_recommendations(5)
-                st.rerun()
-        else:
-            st.success("Connected to LinkedIn")
-            linkedin_disconnect = st.button("Disconnect", key="linkedin_disconnect")
-            
-            if linkedin_disconnect:
-                st.session_state.linkedin_connected = False
-                st.session_state.linkedin_access_token = ""
-                st.rerun()
-    
     # Navigation
     st.markdown("### Navigation")
     
+    if st.button("Data Import", key="nav_import"):
+        st.session_state.active_tab = "import"
+    
     if st.button("My Profile", key="nav_profile"):
-        st.session_state.active_tab = "profile"
+        if not st.session_state.profile_uploaded:
+            st.warning("Please upload your LinkedIn profile data first")
+            st.session_state.active_tab = "import"
+        else:
+            st.session_state.active_tab = "profile"
     
     if st.button("AI Recommendations", key="nav_recommendations"):
-        st.session_state.active_tab = "recommendations"
+        if not st.session_state.connections_uploaded:
+            st.warning("Please upload your LinkedIn connections data first")
+            st.session_state.active_tab = "import"
+        else:
+            st.session_state.active_tab = "recommendations"
     
     if st.button("Message Creator", key="nav_messages"):
-        st.session_state.active_tab = "messages"
+        if not st.session_state.selected_contact:
+            st.warning("Please select a contact from recommendations first")
+            if st.session_state.connections_uploaded:
+                st.session_state.active_tab = "recommendations"
+            else:
+                st.session_state.active_tab = "import"
+        else:
+            st.session_state.active_tab = "messages"
     
     st.markdown("### Networking Goal")
     goal = st.selectbox(
@@ -990,17 +920,122 @@ with st.sidebar:
     
     st.markdown("### About")
     st.markdown("""
-    This AI Networking Assistant helps you leverage your LinkedIn network by identifying valuable connections and crafting personalized outreach messages.
+    This AI Networking Assistant helps you leverage your LinkedIn connections by identifying valuable networking opportunities and crafting personalized outreach messages.
     
     Powered by:
-    - LinkedIn API for profile and connections data
+    - Your LinkedIn archive data
     - Claude AI for intelligent message generation
     - Advanced contact analysis algorithms
     - Goal-oriented networking strategies
     """)
 
 # Main Content Area based on active tab
-if st.session_state.active_tab == "profile":
+if st.session_state.active_tab == "import":
+    st.markdown("<div class='main-header'>Import LinkedIn Data</div>", unsafe_allow_html=True)
+    
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.markdown("""
+    ### How to download your LinkedIn data
+    
+    1. Go to LinkedIn and log in
+    2. Click on your profile picture in the top-right corner
+    3. Select **Settings & Privacy**
+    4. Go to the **Data privacy** section
+    5. Click on **Get a copy of your data**
+    6. Select "Want something in particular?"
+    7. Check **Connections** and **Profile**
+    8. Request archive
+    9. LinkedIn will email you when your data is ready to download
+    10. Download and unzip the archive
+    11. Upload the Profile.csv and Connections.csv files below
+    """)
+    st.markdown("</div>", unsafe_allow_html=True)
+    
+    # Profile data import
+    st.markdown("<div class='sub-header'>Profile Data</div>", unsafe_allow_html=True)
+    
+    if not st.session_state.profile_uploaded:
+        st.markdown("<div class='upload-card'>", unsafe_allow_html=True)
+        profile_file = st.file_uploader("Upload your Profile.csv file", type=["csv"], key="profile_upload")
+        
+        if profile_file is not None:
+            # Process the profile CSV
+            user_profile = process_profile_csv(profile_file)
+            
+            if user_profile:
+                st.session_state.user_profile = user_profile
+                st.session_state.profile_uploaded = True
+                st.success(f"Profile data for {user_profile['name']} successfully imported")
+                st.rerun()
+        
+        st.markdown("</div>", unsafe_allow_html=True)
+    else:
+        st.markdown("<div class='success-card'>", unsafe_allow_html=True)
+        st.markdown(f"✅ **Profile data imported successfully**")
+        st.markdown(f"**Name:** {st.session_state.user_profile.get('name', '')}")
+        st.markdown(f"**Headline:** {st.session_state.user_profile.get('headline', '')}")
+        
+        if st.button("Re-upload Profile"):
+            st.session_state.profile_uploaded = False
+            st.rerun()
+        
+        st.markdown("</div>", unsafe_allow_html=True)
+    
+    # Connections data import
+    st.markdown("<div class='sub-header'>Connections Data</div>", unsafe_allow_html=True)
+    
+    if not st.session_state.connections_uploaded:
+        st.markdown("<div class='upload-card'>", unsafe_allow_html=True)
+        connections_file = st.file_uploader("Upload your Connections.csv file", type=["csv"], key="connections_upload")
+        
+        if connections_file is not None:
+            # Process the connections CSV
+            connections = process_connections_csv(connections_file)
+            
+            if connections:
+                st.session_state.linkedin_connections = connections
+                st.session_state.connections_uploaded = True
+                
+                # Generate initial recommendations
+                st.session_state.recommendations = generate_recommendations(5)
+                
+                st.success(f"Successfully imported {len(connections)} LinkedIn connections")
+                st.rerun()
+        
+        st.markdown("</div>", unsafe_allow_html=True)
+    else:
+        st.markdown("<div class='success-card'>", unsafe_allow_html=True)
+        st.markdown(f"✅ **Connections data imported successfully**")
+        st.markdown(f"**Total Connections:** {len(st.session_state.linkedin_connections)}")
+        
+        if st.button("Re-upload Connections"):
+            st.session_state.connections_uploaded = False
+            st.session_state.linkedin_connections = []
+            st.session_state.recommendations = []
+            st.rerun()
+        
+        st.markdown("</div>", unsafe_allow_html=True)
+    
+    # Next steps
+    if st.session_state.profile_uploaded and st.session_state.connections_uploaded:
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+        st.markdown("### Next Steps")
+        st.markdown("You've successfully imported your LinkedIn data. Now you can:")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("View Your Profile", key="next_profile"):
+                st.session_state.active_tab = "profile"
+                st.rerun()
+        
+        with col2:
+            if st.button("See AI Recommendations", key="next_recommendations"):
+                st.session_state.active_tab = "recommendations"
+                st.rerun()
+        
+        st.markdown("</div>", unsafe_allow_html=True)
+
+elif st.session_state.active_tab == "profile":
     st.markdown("<div class='main-header'>Your LinkedIn Profile</div>", unsafe_allow_html=True)
     
     # Create a card for the profile
@@ -1014,97 +1049,51 @@ if st.session_state.active_tab == "profile":
     
     with col2:
         # Profile info
-        st.markdown(f"### {st.session_state.user_profile['name']}")
-        st.markdown(f"**{st.session_state.user_profile['headline']}**")
-        st.markdown(f"**Current Role:** {st.session_state.user_profile['currentRole']} at {st.session_state.user_profile['company']}")
-        st.markdown(f"**Industry:** {st.session_state.user_profile['industry']}")
-        st.markdown(f"**Location:** {st.session_state.user_profile['location']}")
+        st.markdown(f"### {st.session_state.user_profile.get('name', '')}")
+        st.markdown(f"**{st.session_state.user_profile.get('headline', '')}**")
+        st.markdown(f"**Industry:** {st.session_state.user_profile.get('industry', '')}")
+        st.markdown(f"**Location:** {st.session_state.user_profile.get('location', '')}")
     
     st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
     
-    # Profile form
-    with st.form("profile_form"):
-        st.markdown("### Edit Your Profile")
-        st.markdown("*Note: In a real app, this would sync with your LinkedIn profile*")
-        
-        name = st.text_input("Full Name", value=st.session_state.user_profile["name"])
-        headline = st.text_input("Headline", value=st.session_state.user_profile["headline"])
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            current_role = st.text_input("Current Role", value=st.session_state.user_profile["currentRole"])
-            industry = st.text_input("Industry", value=st.session_state.user_profile["industry"])
-        
-        with col2:
-            company = st.text_input("Company", value=st.session_state.user_profile["company"])
-            location = st.text_input("Location", value=st.session_state.user_profile["location"])
-        
-        expertise = st.text_input("Expertise (comma separated)", value=st.session_state.user_profile["expertise"])
-        interests = st.text_area("Professional Interests", value=st.session_state.user_profile["interests"])
-        
-        submit = st.form_submit_button("Update Profile")
-        
-        if submit:
-            st.session_state.user_profile = {
-                "name": name,
-                "headline": headline,
-                "currentRole": current_role,
-                "industry": industry,
-                "company": company,
-                "location": location,
-                "expertise": expertise,
-                "interests": interests
-            }
-            st.success("Profile updated successfully!")
-            
-            # Update LinkedIn profile simulation
-            if st.session_state.linkedin_connected:
-                st.session_state.linkedin_profile["firstName"] = name.split()[0]
-                st.session_state.linkedin_profile["lastName"] = name.split()[-1] if len(name.split()) > 1 else ""
-                st.session_state.linkedin_profile["headline"] = headline
-                st.session_state.linkedin_profile["industryName"] = industry
-                st.session_state.linkedin_profile["location"] = location
-                st.session_state.linkedin_profile["positions"][0]["title"] = current_role
-                st.session_state.linkedin_profile["positions"][0]["companyName"] = company
-            
-            # Refresh recommendations when profile changes
-            if len(st.session_state.linkedin_connections) > 0:
-                st.session_state.recommendations = generate_recommendations(5)
+    # Profile summary
+    if st.session_state.user_profile.get('summary'):
+        st.markdown("### Summary")
+        st.markdown(st.session_state.user_profile.get('summary', ''))
+        st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
     
-    st.markdown("</div>", unsafe_allow_html=True)
+    # Connection stats
+    st.markdown("### Network Statistics")
     
-    # LinkedIn connection status
-    st.markdown("<div class='sub-header'>LinkedIn Connection Status</div>", unsafe_allow_html=True)
+    col1, col2 = st.columns(2)
     
-    if st.session_state.linkedin_connected:
-        st.markdown("<div class='card'>", unsafe_allow_html=True)
-        st.success("Your LinkedIn account is connected!")
-        
-        # Display connection stats
-        st.markdown(f"**Connections:** {len(st.session_state.linkedin_connections)}")
-        
-        # Industries represented in connections
+    with col1:
+        st.metric("Total Connections", len(st.session_state.linkedin_connections))
+    
+    with col2:
+        # Count connections by industry
         industries = {}
         for connection in st.session_state.linkedin_connections:
             industry = connection.get("industry", "Unknown")
             industries[industry] = industries.get(industry, 0) + 1
         
-        st.markdown("**Industries in your network:**")
-        for industry, count in industries.items():
-            st.markdown(f"- {industry}: {count} connections")
+        # Get the most common industry
+        most_common_industry = max(industries.items(), key=lambda x: x[1]) if industries else ("None", 0)
+        st.metric("Most Common Industry", f"{most_common_industry[0]} ({most_common_industry[1]})")
+    
+    # Industry breakdown
+    if industries:
+        st.markdown("### Industry Breakdown")
         
-        st.markdown("</div>", unsafe_allow_html=True)
-    else:
-        st.markdown("<div class='card'>", unsafe_allow_html=True)
-        st.warning("Your LinkedIn account is not connected.")
-        st.markdown("""
-        To connect your LinkedIn account:
-        1. Configure your LinkedIn API credentials in the sidebar
-        2. Click the "Connect to LinkedIn" button
+        # Sort industries by count
+        sorted_industries = sorted(industries.items(), key=lambda x: x[1], reverse=True)
         
-        For demo purposes, sample connections data is being used.
-        """)
-        st.markdown("</div>", unsafe_allow_html=True)
+        # Display top 5 industries
+        for industry, count in sorted_industries[:5]:
+            percentage = (count / len(st.session_state.linkedin_connections)) * 100
+            st.markdown(f"**{industry}**: {count} connections ({percentage:.1f}%)")
+    
+    st.markdown("</div>", unsafe_allow_html=True)
 
 elif st.session_state.active_tab == "recommendations":
     st.markdown("<div class='main-header'>AI-Powered LinkedIn Networking Recommendations</div>", unsafe_allow_html=True)
@@ -1169,72 +1158,86 @@ elif st.session_state.active_tab == "recommendations":
     
     with col1:
         # Display recommendations
-        for i, contact in enumerate(st.session_state.recommendations):
-            is_selected = st.session_state.selected_contact and st.session_state.selected_contact["id"] == contact["id"]
-            
-            st.markdown(
-                f"<div class='contact-card {'' if not is_selected else 'selected'}' id='contact-{contact['id']}'>",
-                unsafe_allow_html=True
-            )
-            
-            # Contact header with score
-            col_a, col_b = st.columns([3, 1])
-            with col_a:
-                st.markdown(f"### {contact['firstName']} {contact['lastName']}")
-                st.markdown(f"**{contact['role']}** at **{contact['company']}**")
-            
-            with col_b:
+        if not st.session_state.recommendations:
+            st.markdown("<div class='card' style='text-align: center; padding: 2rem;'>", unsafe_allow_html=True)
+            st.markdown("### No Recommendations Available")
+            st.markdown("We couldn't generate any recommendations based on your connections. Try changing your networking goal or refreshing the recommendations.")
+            st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            for i, contact in enumerate(st.session_state.recommendations):
+                is_selected = st.session_state.selected_contact and st.session_state.selected_contact["id"] == contact["id"]
+                
                 st.markdown(
-                    f"<div style='text-align: right;'><span class='badge badge-green'>{contact['score']}% Match</span></div>",
+                    f"<div class='contact-card {'' if not is_selected else 'selected'}' id='contact-{contact['id']}'>",
                     unsafe_allow_html=True
                 )
-                st.markdown(
-                    f"<div style='text-align: right;'><small>{contact['matchStrength']}</small></div>",
-                    unsafe_allow_html=True
-                )
-            
-            # Contact details and insights
-            st.markdown("<div style='margin-top: 0.5rem;'>", unsafe_allow_html=True)
-            
-            # Display badges for industry and expertise
-            expertise_items = contact['expertise'].split(',')[0:2] if ',' in contact['expertise'] else [contact['expertise']]
-            badges_html = f"<span class='badge badge-gray'>{contact['industry']}</span> "
-            for exp in expertise_items:
-                badges_html += f"<span class='badge badge-blue'>{exp.strip()}</span> "
-            
-            st.markdown(f"<div>{badges_html}</div>", unsafe_allow_html=True)
-            
-            # Display insights
-            st.markdown("<div style='margin-top: 0.5rem;'>", unsafe_allow_html=True)
-            for insight in contact['insights']:
-                st.markdown(f"• {insight}")
-            st.markdown("</div>", unsafe_allow_html=True)
-
-# Add footer
-st.markdown("""
-<div style="text-align: center; margin-top: 2rem; padding: 1rem; border-top: 1px solid #E5E7EB;">
-    <p>LinkedIn AI Networking Assistant - Powered by Claude AI</p>
-    <p><small>© 2025 All Rights Reserved</small></p>
-</div>
-""", unsafe_allow_html=True)
-            
-            st.markdown("</div>", unsafe_allow_html=True)
-            
-            # Action buttons
-            col_a, col_b = st.columns([1, 1])
-            with col_a:
-                view_button = st.button("View Profile", key=f"view_{contact['id']}")
-                if view_button:
-                    st.session_state.selected_contact = contact
-            
-            with col_b:
-                message_button = st.button("Create Message", key=f"message_{contact['id']}")
-                if message_button:
-                    st.session_state.selected_contact = contact
-                    st.session_state.active_tab = "messages"
-                    st.rerun()
-            
-            st.markdown("</div>", unsafe_allow_html=True)
+                
+                # Contact header with score
+                col_a, col_b = st.columns([3, 1])
+                with col_a:
+                    st.markdown(f"### {contact.get('firstName', '')} {contact.get('lastName', '')}")
+                    if contact.get('role') and contact.get('company'):
+                        st.markdown(f"**{contact.get('role', '')}** at **{contact.get('company', '')}**")
+                    elif contact.get('role'):
+                        st.markdown(f"**{contact.get('role', '')}**")
+                    elif contact.get('company'):
+                        st.markdown(f"**Works at {contact.get('company', '')}**")
+                
+                with col_b:
+                    st.markdown(
+                        f"<div style='text-align: right;'><span class='badge badge-green'>{contact.get('score', 0)}% Match</span></div>",
+                        unsafe_allow_html=True
+                    )
+                    st.markdown(
+                        f"<div style='text-align: right;'><small>{contact.get('matchStrength', '')}</small></div>",
+                        unsafe_allow_html=True
+                    )
+                
+                # Contact details and insights
+                st.markdown("<div style='margin-top: 0.5rem;'>", unsafe_allow_html=True)
+                
+                # Display badges for industry and expertise
+                industry = contact.get('industry', '')
+                expertise = contact.get('expertise', '')
+                
+                badges_html = f"<span class='badge badge-gray'>{industry}</span> " if industry else ""
+                
+                if expertise:
+                    expertise_items = expertise.split(',')[0:2] if ',' in expertise else [expertise]
+                    for exp in expertise_items:
+                        badges_html += f"<span class='badge badge-blue'>{exp.strip()}</span> "
+                
+                if badges_html:
+                    st.markdown(f"<div>{badges_html}</div>", unsafe_allow_html=True)
+                
+                # Display insights
+                if contact.get('insights'):
+                    st.markdown("<div style='margin-top: 0.5rem;'>", unsafe_allow_html=True)
+                    for insight in contact.get('insights', []):
+                        st.markdown(f"• {insight}")
+                    st.markdown("</div>", unsafe_allow_html=True)
+                
+                # Display connected date
+                if contact.get('connectedDate'):
+                    st.markdown(f"<div style='margin-top: 0.5rem; font-size: 0.8rem; color: #6B7280;'>Connected on: {contact.get('connectedDate')}</div>", unsafe_allow_html=True)
+                
+                st.markdown("</div>", unsafe_allow_html=True)
+                
+                # Action buttons
+                col_a, col_b = st.columns([1, 1])
+                with col_a:
+                    view_button = st.button("View Details", key=f"view_{contact['id']}")
+                    if view_button:
+                        st.session_state.selected_contact = contact
+                
+                with col_b:
+                    message_button = st.button("Create Message", key=f"message_{contact['id']}")
+                    if message_button:
+                        st.session_state.selected_contact = contact
+                        st.session_state.active_tab = "messages"
+                        st.rerun()
+                
+                st.markdown("</div>", unsafe_allow_html=True)
     
     with col2:
         # Display selected contact detail
@@ -1244,40 +1247,48 @@ st.markdown("""
             st.markdown("<div class='card'>", unsafe_allow_html=True)
             
             # Contact header
-            st.markdown(f"### {contact['firstName']} {contact['lastName']}")
-            st.markdown(f"**{contact['role']}** at **{contact['company']}**")
+            st.markdown(f"### {contact.get('firstName', '')} {contact.get('lastName', '')}")
+            if contact.get('role') and contact.get('company'):
+                st.markdown(f"**{contact.get('role', '')}** at **{contact.get('company', '')}**")
+            elif contact.get('role'):
+                st.markdown(f"**{contact.get('role', '')}**")
+            elif contact.get('company'):
+                st.markdown(f"**Works at {contact.get('company', '')}**")
             
-            # LinkedIn profile link
-            if "profileUrl" in contact:
-                st.markdown(f"[View LinkedIn Profile]({contact['profileUrl']})")
+            if contact.get('email'):
+                st.markdown(f"**Email:** {contact.get('email', '')}")
             
             st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
             
             # Contact details
-            st.markdown("<div class='contact-detail'>", unsafe_allow_html=True)
-            st.markdown("<span class='contact-detail-label'>Industry:</span>", unsafe_allow_html=True)
-            st.markdown(contact['industry'])
-            st.markdown("</div>", unsafe_allow_html=True)
+            if contact.get('industry'):
+                st.markdown("<div class='contact-detail'>", unsafe_allow_html=True)
+                st.markdown("<span class='contact-detail-label'>Industry:</span>", unsafe_allow_html=True)
+                st.markdown(contact.get('industry', ''))
+                st.markdown("</div>", unsafe_allow_html=True)
             
-            st.markdown("<div class='contact-detail'>", unsafe_allow_html=True)
-            st.markdown("<span class='contact-detail-label'>Expertise:</span>", unsafe_allow_html=True)
-            st.markdown(contact['expertise'])
-            st.markdown("</div>", unsafe_allow_html=True)
+            if contact.get('expertise'):
+                st.markdown("<div class='contact-detail'>", unsafe_allow_html=True)
+                st.markdown("<span class='contact-detail-label'>Expertise:</span>", unsafe_allow_html=True)
+                st.markdown(contact.get('expertise', ''))
+                st.markdown("</div>", unsafe_allow_html=True)
             
-            st.markdown("<div class='contact-detail'>", unsafe_allow_html=True)
-            st.markdown("<span class='contact-detail-label'>Recent Projects:</span>", unsafe_allow_html=True)
-            st.markdown(contact['recentProjects'])
-            st.markdown("</div>", unsafe_allow_html=True)
+            if contact.get('seniority'):
+                st.markdown("<div class='contact-detail'>", unsafe_allow_html=True)
+                st.markdown("<span class='contact-detail-label'>Seniority Level:</span>", unsafe_allow_html=True)
+                st.markdown(contact.get('seniority', ''))
+                st.markdown("</div>", unsafe_allow_html=True)
             
-            st.markdown("<div class='contact-detail'>", unsafe_allow_html=True)
-            st.markdown("<span class='contact-detail-label'>Key Achievements:</span>", unsafe_allow_html=True)
-            st.markdown(contact['keyAchievements'])
-            st.markdown("</div>", unsafe_allow_html=True)
+            if contact.get('connectedDate'):
+                st.markdown("<div class='contact-detail'>", unsafe_allow_html=True)
+                st.markdown("<span class='contact-detail-label'>Connected On:</span>", unsafe_allow_html=True)
+                st.markdown(contact.get('connectedDate', ''))
+                st.markdown("</div>", unsafe_allow_html=True)
             
-            if contact["mutualConnections"] > 0:
+            if contact.get("mutualConnections", 0) > 0:
                 st.markdown("<div class='contact-detail'>", unsafe_allow_html=True)
                 st.markdown("<span class='contact-detail-label'>Mutual Connections:</span>", unsafe_allow_html=True)
-                st.markdown(f"{contact['mutualConnections']} connections")
+                st.markdown(f"{contact.get('mutualConnections')} connections")
                 st.markdown("</div>", unsafe_allow_html=True)
             
             st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
@@ -1293,12 +1304,6 @@ st.markdown("""
             if create_message:
                 st.session_state.active_tab = "messages"
                 st.rerun()
-            
-            view_on_linkedin = st.button("View on LinkedIn", key="view_on_linkedin")
-            if view_on_linkedin and "profileUrl" in contact:
-                # In a real app, this would open the LinkedIn profile
-                st.markdown(f"<script>window.open('{contact['profileUrl']}', '_blank');</script>", unsafe_allow_html=True)
-                st.info(f"Opening {contact['firstName']}'s LinkedIn profile...")
             
             st.markdown("</div>", unsafe_allow_html=True)
         else:
@@ -1331,8 +1336,13 @@ elif st.session_state.active_tab == "messages":
             st.markdown("<div class='card'>", unsafe_allow_html=True)
             
             # Contact header
-            st.markdown(f"### Creating LinkedIn message for {contact['firstName']} {contact['lastName']}")
-            st.markdown(f"**{contact['role']}** at **{contact['company']}**")
+            st.markdown(f"### Creating LinkedIn message for {contact.get('firstName', '')} {contact.get('lastName', '')}")
+            if contact.get('role') and contact.get('company'):
+                st.markdown(f"**{contact.get('role', '')}** at **{contact.get('company', '')}**")
+            elif contact.get('role'):
+                st.markdown(f"**{contact.get('role', '')}**")
+            elif contact.get('company'):
+                st.markdown(f"**Works at {contact.get('company', '')}**")
             
             st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
             
@@ -1357,7 +1367,7 @@ elif st.session_state.active_tab == "messages":
             custom_topic = st.text_input(
                 "Specific Topic of Interest (optional)",
                 value=st.session_state.custom_topic,
-                placeholder=f"e.g., {contact['expertise'].split(',')[0] if ',' in contact['expertise'] else contact['expertise']} trends"
+                placeholder=f"e.g., {contact.get('expertise', 'their expertise').split(',')[0] if contact.get('expertise') and ',' in contact.get('expertise') else contact.get('expertise', 'professional')} trends"
             )
             
             if custom_topic != st.session_state.custom_topic:
@@ -1480,7 +1490,7 @@ elif st.session_state.active_tab == "messages":
                 st.markdown("""
                 To send this message on LinkedIn:
                 1. Copy the message to your clipboard
-                2. Visit the contact's LinkedIn profile
+                2. Visit your connection's profile on LinkedIn
                 3. Click "Message" and paste your personalized message
                 """)
                 
@@ -1491,13 +1501,6 @@ elif st.session_state.active_tab == "messages":
                     if copy_button:
                         st.write("Message copied to clipboard!")
                         st.write("")  # This is a placeholder for JavaScript (which doesn't work in pure Streamlit)
-                
-                with col_a:
-                    if "profileUrl" in contact:
-                        linkedin_button = st.button("Open LinkedIn Profile", type="primary")
-                        if linkedin_button:
-                            # In a real app, this would open the URL
-                            st.info(f"Opening {contact['firstName']}'s LinkedIn profile...")
             
             st.markdown("</div>", unsafe_allow_html=True)
         
@@ -1507,20 +1510,23 @@ elif st.session_state.active_tab == "messages":
             st.markdown("### Contact Insights")
             
             # Key information about the contact
-            st.markdown("<div class='contact-detail'>", unsafe_allow_html=True)
-            st.markdown("<span class='contact-detail-label'>Industry:</span>", unsafe_allow_html=True)
-            st.markdown(contact['industry'])
-            st.markdown("</div>", unsafe_allow_html=True)
+            if contact.get('industry'):
+                st.markdown("<div class='contact-detail'>", unsafe_allow_html=True)
+                st.markdown("<span class='contact-detail-label'>Industry:</span>", unsafe_allow_html=True)
+                st.markdown(contact.get('industry', ''))
+                st.markdown("</div>", unsafe_allow_html=True)
             
-            st.markdown("<div class='contact-detail'>", unsafe_allow_html=True)
-            st.markdown("<span class='contact-detail-label'>Expertise:</span>", unsafe_allow_html=True)
-            st.markdown(contact['expertise'])
-            st.markdown("</div>", unsafe_allow_html=True)
+            if contact.get('expertise'):
+                st.markdown("<div class='contact-detail'>", unsafe_allow_html=True)
+                st.markdown("<span class='contact-detail-label'>Expertise:</span>", unsafe_allow_html=True)
+                st.markdown(contact.get('expertise', ''))
+                st.markdown("</div>", unsafe_allow_html=True)
             
-            st.markdown("<div class='contact-detail'>", unsafe_allow_html=True)
-            st.markdown("<span class='contact-detail-label'>Recent Projects:</span>", unsafe_allow_html=True)
-            st.markdown(contact['recentProjects'])
-            st.markdown("</div>", unsafe_allow_html=True)
+            if contact.get('connectedDate'):
+                st.markdown("<div class='contact-detail'>", unsafe_allow_html=True)
+                st.markdown("<span class='contact-detail-label'>Connected On:</span>", unsafe_allow_html=True)
+                st.markdown(contact.get('connectedDate', ''))
+                st.markdown("</div>", unsafe_allow_html=True)
             
             st.markdown("<div class='divider'></div>", unsafe_allow_html=True)
             
@@ -1532,13 +1538,13 @@ elif st.session_state.active_tab == "messages":
                 **Career Advancement Tips:**
                 - Mention specific aspects of their career path you admire
                 - Ask for advice rather than opportunities
-                - Reference a specific achievement or project that impressed you
+                - Reference a specific expertise or project of theirs
                 - Be clear about your own career aspirations
                 """)
             elif st.session_state.networking_goal == "Industry Knowledge":
                 st.markdown("""
                 **Industry Knowledge Tips:**
-                - Reference specific content they've created or projects they've worked on
+                - Reference specific expertise they possess
                 - Ask targeted questions about industry trends
                 - Mention your own relevant experiences or insights
                 - Offer value through your own perspective
@@ -1572,7 +1578,7 @@ elif st.session_state.active_tab == "messages":
                 if starter_copy:
                     # Insert the starter into the message
                     if not st.session_state.generated_message:
-                        st.session_state.generated_message = f"Hi {contact['firstName']},\n\n{starter}\n\nWould you be open to a brief conversation about this? I'd appreciate your insights.\n\nBest regards,\n{st.session_state.user_profile['name']}"
+                        st.session_state.generated_message = f"Hi {contact.get('firstName', '')},\n\n{starter}\n\nWould you be open to a brief conversation about this? I'd appreciate your insights.\n\nBest regards,\n{st.session_state.user_profile.get('name', '')}"
                     else:
                         # Try to insert after greeting
                         message_parts = st.session_state.generated_message.split('\n\n')
@@ -1606,3 +1612,11 @@ elif st.session_state.active_tab == "messages":
                     st.rerun()
             
             st.markdown("</div>", unsafe_allow_html=True)
+
+# Add footer
+st.markdown("""
+<div style="text-align: center; margin-top: 2rem; padding: 1rem; border-top: 1px solid #E5E7EB;">
+    <p>LinkedIn AI Networking Assistant - Powered by Claude AI</p>
+    <p><small>© 2025 All Rights Reserved</small></p>
+</div>
+""", unsafe_allow_html=True)
