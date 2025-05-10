@@ -60,44 +60,86 @@ if "initialized" not in st.session_state:
         "location": ""
     }
 
-# Custom CSS for styling
+# Custom CSS for styling with dark mode support
 st.markdown("""
 <style>
+    /* Use CSS variables that adapt to Streamlit's theme */
+    :root {
+        --text-color: #1e293b;
+        --bg-color: #ffffff;
+        --card-bg: #ffffff;
+        --border-color: #e5e7eb;
+        --accent-blue: #0A66C2;
+        --hover-bg: #f8fafc;
+        --selected-bg: #e8f0fe;
+        --muted-text: #64748b;
+        --success-bg: #d1fae5;
+        --success-text: #065f46;
+        --gray-bg: #f3f4f6;
+        --gray-text: #374151;
+    }
+    
+    /* Dark mode overrides */
+    [data-theme="dark"], .stApp[data-theme="dark"] {
+        --text-color: #e2e8f0;
+        --bg-color: #0f172a;
+        --card-bg: #1e293b;
+        --border-color: #334155;
+        --accent-blue: #38bdf8;
+        --hover-bg: #334155;
+        --selected-bg: #1e3a4f;
+        --muted-text: #94a3b8;
+        --success-bg: #064e3b;
+        --success-text: #6ee7b7;
+        --gray-bg: #334155;
+        --gray-text: #cbd5e1;
+    }
+    
+    /* Apply theme colors to elements */
     .main-header {
         font-size: 2rem !important;
         font-weight: 600;
-        color: #0A66C2;
+        color: var(--accent-blue);
         margin-bottom: 1rem;
     }
+    
     .sub-header {
         font-size: 1.5rem !important;
         font-weight: 500;
-        color: #0A66C2;
+        color: var(--accent-blue);
         margin-top: 1rem;
         margin-bottom: 0.5rem;
     }
+    
     .card {
         padding: 1.5rem;
         border-radius: 0.5rem;
-        background-color: white;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
+        background-color: var(--card-bg);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
         margin-bottom: 1rem;
+        border: 1px solid var(--border-color);
     }
+    
     .contact-card {
         padding: 1rem;
         border-radius: 0.5rem;
-        background-color: white;
-        border: 1px solid #E5E7EB;
+        background-color: var(--card-bg);
+        border: 1px solid var(--border-color);
         margin-bottom: 0.5rem;
         cursor: pointer;
+        color: var(--text-color);
     }
+    
     .contact-card:hover {
-        box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
+        background-color: var(--hover-bg);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
     }
+    
     .contact-card.selected {
-        border: 1px solid #0A66C2;
-        background-color: #E8F0FE;
+        border: 1px solid var(--accent-blue);
+        background-color: var(--selected-bg);
     }
+    
     .badge {
         display: inline-block;
         padding: 0.25rem 0.5rem;
@@ -105,73 +147,183 @@ st.markdown("""
         font-weight: 500;
         border-radius: 9999px;
     }
+    
     .badge-blue {
-        background-color: #E8F0FE;
-        color: #0A66C2;
+        background-color: var(--accent-blue);
+        color: white;
+        opacity: 0.9;
     }
+    
     .badge-green {
-        background-color: #D1FAE5;
-        color: #065F46;
+        background-color: var(--success-bg);
+        color: var(--success-text);
     }
+    
     .badge-gray {
-        background-color: #F3F4F6;
-        color: #374151;
+        background-color: var(--gray-bg);
+        color: var(--gray-text);
     }
+    
     .divider {
         height: 1px;
-        background-color: #E5E7EB;
+        background-color: var(--border-color);
         margin: 1rem 0;
     }
+    
     .stButton>button {
         width: 100%;
     }
+    
     .contact-detail {
         margin-bottom: 0.5rem;
+        color: var(--text-color);
     }
+    
     .contact-detail-label {
         font-weight: 600;
-        color: #4B5563;
+        color: var(--muted-text);
     }
+    
     .message-area {
-        border: 1px solid #E5E7EB;
+        border: 1px solid var(--border-color);
         border-radius: 0.375rem;
         padding: 0.75rem;
         min-height: 200px;
         margin-bottom: 1rem;
-        background-color: #F9FAFB;
+        background-color: var(--card-bg);
+        color: var(--text-color);
     }
+    
     .custom-tab {
         padding: 0.5rem 1rem;
         font-weight: 500;
         border-bottom: 2px solid transparent;
         cursor: pointer;
+        color: var(--muted-text);
     }
+    
     .custom-tab:hover {
-        color: #0A66C2;
+        color: var(--accent-blue);
     }
+    
     .custom-tab.active {
-        color: #0A66C2;
-        border-bottom: 2px solid #0A66C2;
+        color: var(--accent-blue);
+        border-bottom: 2px solid var(--accent-blue);
     }
+    
     .api-info {
         padding: 0.5rem;
-        background-color: #F3F4F6;
+        background-color: var(--gray-bg);
         border-radius: 0.375rem;
         font-size: 0.8rem;
         margin-top: 0.5rem;
+        color: var(--text-color);
     }
+    
     .upload-card {
-        border: 1px dashed #0A66C2;
+        border: 1px dashed var(--accent-blue);
         border-radius: 0.5rem;
         padding: 1.5rem;
         margin: 1rem 0;
         text-align: center;
+        background-color: var(--card-bg);
+        color: var(--text-color);
     }
+    
     .success-card {
-        background-color: #D1FAE5;
+        background-color: var(--success-bg);
         border-radius: 0.5rem;
         padding: 1rem;
         margin: 1rem 0;
+        color: var(--success-text);
+        border: 1px solid var(--success-text);
+    }
+    
+    /* Fix text colors in various elements */
+    .stTextInput label, .stSelectbox label, .stTextArea label {
+        color: var(--text-color) !important;
+    }
+    
+    .stMarkdown, .stWrite, p, span, div {
+        color: var(--text-color);
+    }
+    
+    /* Fix sidebar text */
+    .css-1aumxhk {
+        color: var(--text-color);
+    }
+    
+    /* Fix metric colors */
+    .metric-container {
+        color: var(--text-color);
+    }
+    
+    /* Fix expander header color */
+    .streamlit-expanderHeader {
+        color: var(--text-color) !important;
+    }
+    
+    /* Fix small text */
+    small {
+        color: var(--muted-text);
+    }
+    
+    /* Fix insights and other small text elements */
+    .badge-gray, .badge-blue, .badge-green {
+        margin-right: 0.25rem;
+        margin-bottom: 0.25rem;
+    }
+    
+    /* Ensure input fields work in dark mode */
+    .stTextInput input, .stTextArea textarea, .stSelectbox select {
+        background-color: var(--card-bg) !important;
+        color: var(--text-color) !important;
+        border-color: var(--border-color) !important;
+    }
+    
+    /* Fix button colors */
+    .stButton button {
+        background-color: var(--card-bg);
+        color: var(--text-color);
+        border-color: var(--border-color);
+    }
+    
+    .stButton button:hover {
+        background-color: var(--hover-bg);
+    }
+    
+    /* Fix specific style overrides for dark text */
+    [data-theme="dark"] .contact-detail,
+    [data-theme="dark"] .contact-detail-label,
+    [data-theme="dark"] .api-info,
+    [data-theme="dark"] .upload-card,
+    [data-theme="dark"] .message-area {
+        color: inherit;
+    }
+    
+    /* Fix inline styles that might override dark mode */
+    [data-theme="dark"] div[style*="color: #"] {
+        color: var(--text-color) !important;
+    }
+    
+    /* Fix center-aligned text */
+    [data-theme="dark"] div[style*="text-align: center"] {
+        color: var(--text-color);
+    }
+    
+    /* Fix right-aligned text */
+    [data-theme="dark"] div[style*="text-align: right"] {
+        color: var(--text-color);
+    }
+    
+    /* Fix headers in dark mode */
+    [data-theme="dark"] h1, [data-theme="dark"] h2, [data-theme="dark"] h3, [data-theme="dark"] h4 {
+        color: var(--text-color);
+    }
+    
+    /* Fix markdown link colors */
+    [data-theme="dark"] a {
+        color: var(--accent-blue);
     }
 </style>
 """, unsafe_allow_html=True)
@@ -2018,7 +2170,7 @@ elif st.session_state.active_tab == "messages":
             starters = generate_conversation_starters(contact)
             for i, starter in enumerate(starters):
                 starter_copy = st.button(f"Use This ↩️", key=f"copy_starter_{i}")
-                st.markdown(f"<div style='padding: 0.5rem; margin-bottom: 0.5rem; border-radius: 0.25rem; background-color: #F3F4F6;'>{starter}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='padding: 0.5rem; margin-bottom: 0.5rem; border-radius: 0.25rem; background-color: var(--gray-bg);'>{starter}</div>", unsafe_allow_html=True)
                 
                 if starter_copy:
                     # Insert the starter into the message
@@ -2060,7 +2212,7 @@ elif st.session_state.active_tab == "messages":
 
 # Add footer
 st.markdown("""
-<div style="text-align: center; margin-top: 2rem; padding: 1rem; border-top: 1px solid #E5E7EB;">
+<div style="text-align: center; margin-top: 2rem; padding: 1rem; border-top: 1px solid var(--border-color); color: var(--muted-text);">
     <p>LinkedIn AI Networking Assistant - Powered by Claude AI</p>
     <p><small>© 2025 All Rights Reserved</small></p>
 </div>
